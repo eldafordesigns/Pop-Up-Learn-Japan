@@ -1,18 +1,15 @@
 {
-  "functions": {
-    "api/index.js": {
-      "maxDuration": 30,
-      "includeFiles": "{index.html,node_modules/kuromoji/dict/**}"
-    }
-  },
-  "rewrites": [
+  "version": 2,
+  "builds": [
     {
-      "source": "/",
-      "destination": "/api/index"
+      "src": "api/index.js",
+      "use": "@vercel/node",
+      "config": { "includeFiles": ["dapur.js", "node_modules/kuromoji/dict/**"] }
     },
-    {
-      "source": "/api/:path*",
-      "destination": "/api/index"
-    }
+    { "src": "index.html", "use": "@vercel/static" }
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/index.js" },
+    { "src": "/", "dest": "/index.html" }
   ]
 }
