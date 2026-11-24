@@ -23,6 +23,7 @@ const MSG = {
   NO_WORDS: 'Tidak ada kata yang cocok di bagian ini. Tekan NEXT untuk mencoba lagi.',
   TRANSLATE_FAIL: 'Layanan terjemahan sedang sibuk. Tekan NEXT untuk mencoba lagi.',
   BOT_BLOCK: 'YouTube menolak memberi subtitle ke server ini (server dianggap bot). Pakai "Tempel manual" di bawah: unggah atau tempel file subtitle .srt/.vtt.',
+  QUOTA: 'Kuota layanan subtitle bulan ini habis. Pakai "Tempel manual" di bawah, atau coba lagi bulan depan.',
   NO_TOKENIZER: 'Mesin pemecah kata Jepang belum siap. Tunggu sebentar lalu coba lagi.',
 };
 
@@ -149,27 +150,27 @@ const YT_CLIENTS = [
   { label: 'TV', ua: CHROME_UA, embed: true, client: { clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER', clientVersion: '2.0', hl: 'en' } },
   { label: 'WEB', ua: CHROME_UA, client: { clientName: 'WEB', clientVersion: '2.20250219.01.00', hl: 'en' } },
 ];
-async function playerCall(fetchImpl, c, videoId) {
+async function playerCall(fetchImpl, c, videoId, ms) {
   const context = { client: c.client }; if (c.embed) context.thirdParty = { embedUrl: 'https://www.google.com/' };
   return JSON.parse(await getText(fetchImpl, 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'User-Agent': c.ua, 'Accept-Language': 'en-US,en;q=0.9', Origin: 'https://www.youtube.com' },
     body: JSON.stringify({ context, videoId, contentCheckOk: true, racyCheckOk: true }),
-  }, { timeout: 4500 }));
+  }, { timeout: ms }));
 }
-async function pageCall(fetchImpl, videoId) {
+async function pageCall(fetchImpl, videoId, ms) {
   const html = await getText(fetchImpl, `https://www.youtube.com/watch?v=${videoId}&hl=en&has_verified=1&bpctr=9999999999`, {
     redirect: 'follow',
     headers: { 'User-Agent': CHROME_UA, 'Accept-Language': 'en-US,en;q=0.9', Cookie: 'CONSENT=YES+cb.20240101-00-p0.en+FX+000; SOCS=CAI' },
-  }, { timeout: 4500, max: 8e6 });
+  }, { timeout: ms, max: 8e6 });
   return extractPlayerResponse(html);
 }
 const tag = (e) => { const m = /^HTTP (\d+)/.exec((e && e.message) || ''); return m ? m[1] : (e && e.name === 'TimeoutError') ? 'timeout' : 'gagal'; };
 
-async function fetchSubtitles(fetchImpl, videoId) {
-  const deadline = Date.now() + 8000, trace = [];
+async function fetchSubtitles(fetchImpl, videoId, budget = 8000) {
+  const deadline = Date.now() + budget, trace = [], ms = Math.min(4500, budget);
   const left = () => Math.max(1000, Math.min(4000, deadline - Date.now()));
-  const calls = [...YT_CLIENTS.map((c) => ({ label: c.label, run: () => playerCall(fetchImpl, c, videoId) })), { label: 'PAGE', run: () => pageCall(fetchImpl, videoId) }];
+  const calls = [...YT_CLIENTS.map((c) => ({ label: c.label, run: () => playerCall(fetchImpl, c, videoId, ms) })), { label: 'PAGE', run: () => pageCall(fetchImpl, videoId, ms) }];
   const results = await Promise.all(calls.map(async (c) => { try { const info = await c.run(); return { label: c.label, info, note: info ? 'ok' : 'kosong' }; } catch (e) { return { label: c.label, info: null, note: tag(e) }; } }));
   results.forEach((r) => trace.push(r.label + ':' + r.note));
   const got = results.filter((r) => r.info && typeof r.info === 'object');
@@ -199,6 +200,43 @@ async function fetchSubtitles(fetchImpl, videoId) {
     }
   }
   return { error: 'BOT_BLOCK', trace };
+}
+
+
+// ---- Layanan perantara gratis (Supadata): dipakai bila SUPADATA_API_KEY diisi di Vercel ----
+async function supadataCall(fetchImpl, key, videoId, lang) {
+  const u = new URL('https://api.supadata.ai/v1/transcript');
+  u.searchParams.set('url', 'https://www.youtube.com/watch?v=' + videoId); u.searchParams.set('text', 'false'); u.searchParams.set('mode', 'native');
+  if (lang) u.searchParams.set('lang', lang);
+  const r = await fetchImpl(u.toString(), { headers: { 'x-api-key': key }, redirect: 'error', signal: AbortSignal.timeout(6000) });
+  let j = null; try { j = JSON.parse(await r.text()); } catch { /* bukan JSON */ }
+  return { status: r.status, j };
+}
+const supCues = (content) => (Array.isArray(content) ? content : []).map((c) => {
+  const start = (Number(c && c.offset) || 0) / 1000, d = (Number(c && c.duration) || 0) / 1000;
+  return { start, end: start + (d > 0 ? d : 2), text: cleanText(c && c.text) };
+}).filter((c) => c.text);
+
+async function fetchViaSupadata(fetchImpl, key, videoId) { // hasil: {ok,...} | {error:'NO_SUBTITLE'|'QUOTA'|'SOFT', trace}
+  const trace = [];
+  try {
+    const a = await supadataCall(fetchImpl, key, videoId, null); trace.push('SUPADATA:' + a.status);
+    if (a.status === 402 || a.status === 429) return { error: 'QUOTA', trace };
+    if (a.status === 206 || a.status === 404) return { error: 'NO_SUBTITLE', trace };
+    if (a.status !== 200 || !a.j) return { error: 'SOFT', trace };
+    let { lang, content } = a.j; const avail = Array.isArray(a.j.availableLangs) ? a.j.availableLangs : [];
+    let cues = supCues(content);
+    const want = ['ja', 'id', 'en'].find((l) => avail.some((x) => String(x).split('-')[0] === l));
+    if (want && String(lang || '').split('-')[0] !== want) { // ada bahasa yang lebih cocok: minta sekali lagi
+      try {
+        const b = await supadataCall(fetchImpl, key, videoId, want); trace.push('SUPADATA/' + want + ':' + b.status);
+        const c2 = b.status === 200 && b.j ? supCues(b.j.content) : [];
+        if (c2.length) { cues = c2; lang = b.j.lang || want; }
+      } catch { trace.push('SUPADATA/' + want + ':gagal'); }
+    }
+    if (!cues.length) return { error: 'NO_SUBTITLE', trace };
+    return { ok: true, videoId, title: '', language: String(lang || 'und'), auto: false, cues, trace };
+  } catch (e) { trace.push('SUPADATA:' + tag(e)); return { error: 'SOFT', trace }; }
 }
 
 // ---------- Kana & romaji ----------
@@ -352,9 +390,29 @@ function defaultTokenizer() {
 
 const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.youtube.com https://s.ytimg.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com; img-src 'self' data: https://i.ytimg.com; media-src *; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
-function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, indexPath = path.join(__dirname, 'index.html') } = {}) {
+function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, indexPath = path.join(__dirname, 'index.html'), supadataKey = process.env.SUPADATA_API_KEY } = {}) {
   const hits = new Map();
   const cache = new Map();
+  const subCache = new Map(); // subtitle disimpan SEMENTARA di memori server (20 menit) agar hemat kuota; tidak ada penyimpanan permanen
+
+  async function loadSubs(id) {
+    const hit = subCache.get(id);
+    if (hit && Date.now() - hit.t < 20 * 60 * 1000) return hit.v;
+    let out = null, pre = [], quota = false;
+    if (supadataKey) {
+      const s = await fetchViaSupadata(fetchImpl, String(supadataKey).trim(), id);
+      pre = s.trace || [];
+      if (s.ok || s.error === 'NO_SUBTITLE') out = s;
+      quota = s.error === 'QUOTA';
+    }
+    if (!out) { // cadangan: langsung ke YouTube
+      out = await fetchSubtitles(fetchImpl, id, supadataKey ? 3000 : 8000);
+      out.trace = [...pre, ...(out.trace || [])];
+      if (quota && out.error) out = { error: 'QUOTA', trace: out.trace };
+    }
+    if (out.ok) { if (subCache.size >= 30) subCache.delete(subCache.keys().next().value); subCache.set(id, { t: Date.now(), v: out }); }
+    return out;
+  }
   setInterval(() => hits.clear(), 60000).unref();
 
   return http.createServer(async (req, res) => {
@@ -381,7 +439,7 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
         const v = raw.length > 300 ? { error: 'BAD_LINK' } : extractVideoId(raw);
         if (v.error) return fail(400, v.error);
         let out;
-        try { out = await fetchSubtitles(fetchImpl, v.id); } catch { return fail(502, 'UPSTREAM'); }
+        try { out = await loadSubs(v.id); } catch { return fail(502, 'UPSTREAM'); }
         return out.error ? send(out.error === 'UPSTREAM' ? 502 : 200, { ok: false, code: out.error, message: MSG[out.error], trace: (out.trace || []).join(' ').slice(0, 400) }) : send(200, out);
       }
 
@@ -416,7 +474,7 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
   });
 }
 
-module.exports = { createServer, parseXml, parseVtt, parseCaption, extractPlayerResponse, orderTracks, fetchSubtitles, extractVideoId, parseJson3, pickTrack, captionUrl, cleanText, buildCard, cleanInput, toRomaji, toHiragana, candidates, partsOf };
+module.exports = { createServer, fetchViaSupadata, parseXml, parseVtt, parseCaption, extractPlayerResponse, orderTracks, fetchSubtitles, extractVideoId, parseJson3, pickTrack, captionUrl, cleanText, buildCard, cleanInput, toRomaji, toHiragana, candidates, partsOf };
 
 if (require.main === module) {
   createServer().listen(PORT, () => {
