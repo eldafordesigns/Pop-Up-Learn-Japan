@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#16162a">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>Belajar Jepang dari Video</title>
 <style>
 :root{--bg:#16162a;--card:#222244;--ink:#f4f4ff;--mute:#a9a9cc;--acc:#ff5d8f;--acc2:#5ee0c0;--line:#33335c}
@@ -117,10 +118,21 @@ function loadYT() {
   });
   return ytLoading;
 }
+const YT_ERR = { 2: 'Link video tidak valid.', 5: 'Pemutar YouTube bermasalah di browser ini. Muat ulang halaman (Ctrl+F5).', 100: 'Video tidak ditemukan atau bersifat pribadi.', 101: 'Pemilik video melarang diputar di luar YouTube. Coba video lain.', 150: 'Pemilik video melarang diputar di luar YouTube. Coba video lain.', 153: 'YouTube menolak pemutar ini (error 153). Muat ulang halaman dengan Ctrl+F5, lalu coba lagi.' };
 async function mountYouTube(id) {
   await loadYT();
   $('player').innerHTML = '<div id="yt"></div>';
-  return new Promise((res) => { const y = new YT.Player('yt', { videoId: id, width: '100%', height: '100%', playerVars: { playsinline: 1, controls: 0, rel: 0, modestbranding: 1 }, events: { onReady: () => res(ytAdapter(y)) } }); });
+  return new Promise((res, rej) => {
+    const timer = setTimeout(() => rej(new Error('timeout')), 15000);
+    new YT.Player('yt', {
+      videoId: id, width: '100%', height: '100%',
+      playerVars: { playsinline: 1, controls: 0, rel: 0, modestbranding: 1, origin: location.origin },
+      events: {
+        onReady: (e) => { clearTimeout(timer); res(ytAdapter(e.target)); },
+        onError: (e) => { clearTimeout(timer); status(YT_ERR[e.data] || ('Video tidak bisa diputar (kode ' + e.data + ').'), true); }
+      }
+    });
+  });
 }
 function mountVideo(src) {
   const v = document.createElement('video'); v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'metadata'; v.src = src;
@@ -145,7 +157,7 @@ async function getSubs(raw) {
   if (!ytId(raw)) return status('Ambil subtitle otomatis hanya untuk link YouTube. Untuk file video, tempel subtitle manual.', true);
   status('⏳ Mengambil subtitle dari video…'); subs = null; acc = 0;
   try {
-    const r = await (await fetch('/api/subtitles?url=' + encodeURIComponent(raw))).json();
+    const r = await (await fetch('/api/subtitles?url=' + encodeURIComponent(raw), { signal: AbortSignal.timeout(25000) })).json();
     if (r.ok) { subs = { cues: r.cues, lang: r.language, auto: r.auto }; status(`✅ Subtitle siap (bahasa: ${r.language}${r.auto ? ', otomatis' : ''}). Tekan Putar.`); }
     else { status((r.message || 'Subtitle gagal dimuat.') + (r.trace ? ' [' + r.trace + ']' : ''), true); $('pasteBox').open = true; }
   } catch (e) { status('Gagal mengambil subtitle. Periksa internet lalu coba lagi.', true); }
@@ -159,13 +171,13 @@ $('load').onclick = async () => {
   const id = ytId(raw);
   try {
     if (id) {
-      status('Memuat video dan subtitle…');
-      P = await mountYouTube(id); $('stage').hidden = false;
+      status('Memuat pemutar video…'); $('stage').hidden = false;
+      P = await mountYouTube(id);
       await getSubs(raw);
     } else if (/\.(mp4|webm|mov)(\?|#|$)/i.test(raw)) {
       P = mountVideo(raw); $('stage').hidden = false; status('Video dimuat. Tempel subtitle manual di bawah agar sorotan kata bisa jalan.'); $('pasteBox').open = true;
     } else status('Link belum didukung. Pakai link YouTube atau link file video (.mp4).', true);
-  } catch (e) { status('Gagal memuat. Periksa internet lalu coba lagi.', true); }
+  } catch (e) { status(e && e.message === 'timeout' ? 'Pemutar YouTube tidak merespons. Coba video lain, matikan pemblokir iklan untuk situs ini, atau muat ulang dengan Ctrl+F5.' : 'Gagal memuat. Periksa internet lalu coba lagi.', true); }
 };
 function openSite(kind) {
   const raw = $('link').value.trim();
