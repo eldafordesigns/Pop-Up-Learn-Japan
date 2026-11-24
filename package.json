@@ -11,6 +11,6 @@
     "kuromoji": "0.1.2"
   },
   "engines": {
-    "node": "20.x"
+    "node": "26.x"
   }
 }
