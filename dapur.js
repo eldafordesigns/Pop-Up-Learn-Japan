@@ -22,6 +22,7 @@ const MSG = {
   BAD_INPUT: 'Data yang dikirim tidak lengkap atau tidak valid.',
   NO_WORDS: 'Tidak ada kata yang cocok di bagian ini. Tekan NEXT untuk mencoba lagi.',
   TRANSLATE_FAIL: 'Layanan terjemahan sedang sibuk. Tekan NEXT untuk mencoba lagi.',
+  BOT_BLOCK: 'YouTube menolak memberi subtitle ke server ini (server dianggap bot). Pakai "Tempel manual" di bawah: unggah atau tempel file subtitle .srt/.vtt.',
   NO_TOKENIZER: 'Mesin pemecah kata Jepang belum siap. Tunggu sebentar lalu coba lagi.',
 };
 
@@ -55,41 +56,149 @@ function parseJson3(data) {
   return cues;
 }
 
-function pickTrack(tracks) { // Jepang > Indonesia > Inggris > lain; buatan manusia dulu
-  const match = (t, l) => t.languageCode === l || (t.languageCode || '').startsWith(l + '-');
-  for (const l of ['ja', 'id', 'en']) {
-    const list = tracks.filter((t) => match(t, l));
-    if (list.length) return list.find((t) => t.kind !== 'asr') || list[0];
-  }
-  return tracks.find((t) => t.kind !== 'asr') || tracks[0] || null;
+const matchLang = (t, l) => t.languageCode === l || (t.languageCode || '').startsWith(l + '-');
+function orderTracks(tracks) { // Jepang > Indonesia > Inggris > lain; buatan manusia dulu, lalu otomatis
+  const out = [], seen = new Set();
+  const add = (list) => { for (const t of [...list.filter((x) => x.kind !== 'asr'), ...list.filter((x) => x.kind === 'asr')]) if (!seen.has(t)) { seen.add(t); out.push(t); } };
+  for (const l of ['ja', 'id', 'en']) add(tracks.filter((t) => matchLang(t, l)));
+  add(tracks);
+  return out;
 }
+const pickTrack = (tracks) => orderTracks(tracks)[0] || null;
 
-async function getText(fetchImpl, url, opts = {}) {
-  const r = await fetchImpl(url, { ...opts, signal: AbortSignal.timeout(8000), redirect: 'error' });
+const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
+
+async function getText(fetchImpl, url, opts = {}, lim = {}) {
+  const r = await fetchImpl(url, { redirect: 'error', ...opts, signal: AbortSignal.timeout(lim.timeout || 8000) });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const t = await r.text();
-  if (t.length > 3e6) throw new Error('terlalu besar');
+  if (t.length > (lim.max || 3e6)) throw new Error('terlalu besar');
   return t;
 }
 
-function captionUrl(baseUrl) {
+function captionUrl(baseUrl, fmt = 'json3') {
   const u = new URL(baseUrl);
   if (u.protocol !== 'https:' || !(u.hostname === 'youtube.com' || u.hostname.endsWith('.youtube.com'))) throw new Error('alamat subtitle mencurigakan');
-  u.searchParams.set('fmt', 'json3');
+  if (fmt) u.searchParams.set('fmt', fmt); else u.searchParams.delete('fmt');
   return u.toString();
 }
 
-async function fetchSubtitles(fetchImpl, videoId) {
-  const info = JSON.parse(await getText(fetchImpl, 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+// ---- pembaca berbagai format subtitle ----
+function decodeEntities(s) {
+  const once = (x) => x.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (m, e) => {
+    const l = e.toLowerCase();
+    if (l[0] === '#') { const cp = l[1] === 'x' ? parseInt(l.slice(2), 16) : parseInt(l.slice(1), 10); try { return String.fromCodePoint(cp); } catch { return ' '; } }
+    return { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }[l];
+  });
+  return once(once(String(s)));
+}
+const attr = (a, n) => { const m = a.match(new RegExp('(?:^|\\s)' + n + '="([^"]*)"')); return m ? m[1] : null; };
+const num = (v, k = 1) => (v == null || v === '' ? NaN : Number(v) / k);
+
+function parseXml(xml) { // format srv3 (<p t= d=>) dan format lama (<text start= dur=>)
+  const cues = [];
+  const add = (start, dur, inner) => {
+    const text = cleanText(decodeEntities(inner.replace(/<[^>]*>/g, '')));
+    if (text && Number.isFinite(start)) cues.push({ start, end: start + (Number.isFinite(dur) ? dur : 2), text });
+  };
+  let m;
+  const p = /<p\b([^>]*)>([\s\S]*?)<\/p>/g;
+  while ((m = p.exec(xml))) add(num(attr(m[1], 't'), 1000), num(attr(m[1], 'd'), 1000), m[2]);
+  if (!cues.length) { const t = /<text\b([^>]*)>([\s\S]*?)<\/text>/g; while ((m = t.exec(xml))) add(num(attr(m[1], 'start')), num(attr(m[1], 'dur')), m[2]); }
+  return cues.sort((x, y) => x.start - y.start);
+}
+
+function parseTimestamp(s) { const m = String(s).trim().match(/(?:(\d+):)?(\d+):(\d+)[.,](\d+)/); return m ? Number(m[1] || 0) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number('0.' + m[4]) : NaN; }
+function parseVtt(txt) { // WEBVTT atau SRT
+  const cues = [];
+  for (const b of String(txt).replace(/\r/g, '').split(/\n{2,}/)) {
+    const l = b.split('\n'), i = l.findIndex((x) => x.includes('-->')); if (i < 0) continue;
+    const [a, c] = l[i].split('-->'), s = parseTimestamp(a), e = parseTimestamp(String(c || '').trim().split(/\s/)[0]);
+    const text = cleanText(decodeEntities(l.slice(i + 1).join(' ').replace(/<[^>]*>/g, '')));
+    if (!text || isNaN(s)) continue;
+    if (cues.length && cues[cues.length - 1].text === text) { cues[cues.length - 1].end = isNaN(e) ? s + 2 : e; continue; } // baris berulang
+    cues.push({ start: s, end: isNaN(e) ? s + 2 : e, text });
+  }
+  return cues.sort((x, y) => x.start - y.start);
+}
+
+function parseCaption(raw) { // otomatis mengenali JSON, VTT/SRT, atau XML
+  const t = String(raw || '').replace(/^\uFEFF/, '').trim();
+  if (!t) return [];
+  if (t[0] === '{') { try { return parseJson3(JSON.parse(t)); } catch { return []; } }
+  if (t.includes('-->')) return parseVtt(t);
+  if (t[0] === '<') return parseXml(t);
+  return [];
+}
+
+function extractPlayerResponse(html) { // ambil data video dari halaman tonton YouTube
+  const m = /ytInitialPlayerResponse\s*=\s*\{/.exec(html || ''); if (!m) return null;
+  const start = m.index + m[0].length - 1; let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < html.length; i++) {
+    const c = html[i];
+    if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true; else if (c === '{') depth++; else if (c === '}' && --depth === 0) { try { return JSON.parse(html.slice(start, i + 1)); } catch { return null; } }
+  }
+  return null;
+}
+
+// ---- beberapa "pintu" ke YouTube; semua dicoba bersamaan, yang berhasil dipakai ----
+const YT_CLIENTS = [
+  { label: 'ANDROID', ua: 'com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip', client: { clientName: 'ANDROID', clientVersion: '20.10.38', androidSdkVersion: 30, osName: 'Android', osVersion: '11', hl: 'en' } },
+  { label: 'IOS', ua: 'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)', client: { clientName: 'IOS', clientVersion: '20.10.4', deviceMake: 'Apple', deviceModel: 'iPhone16,2', osName: 'iPhone', osVersion: '18.3.2.22D82', hl: 'en' } },
+  { label: 'TV', ua: CHROME_UA, embed: true, client: { clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER', clientVersion: '2.0', hl: 'en' } },
+  { label: 'WEB', ua: CHROME_UA, client: { clientName: 'WEB', clientVersion: '2.20250219.01.00', hl: 'en' } },
+];
+async function playerCall(fetchImpl, c, videoId) {
+  const context = { client: c.client }; if (c.embed) context.thirdParty = { embedUrl: 'https://www.google.com/' };
+  return JSON.parse(await getText(fetchImpl, 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'User-Agent': 'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip' },
-    body: JSON.stringify({ context: { client: { clientName: 'ANDROID', clientVersion: '19.09.37', androidSdkVersion: 30, hl: 'en' } }, videoId }),
-  }));
-  const track = pickTrack(info?.captions?.playerCaptionsTracklistRenderer?.captionTracks || []);
-  if (!track) return { error: 'NO_SUBTITLE' };
-  const cues = parseJson3(JSON.parse(await getText(fetchImpl, captionUrl(track.baseUrl))));
-  if (!cues.length) return { error: 'NO_SUBTITLE' };
-  return { ok: true, videoId, title: cleanText(info?.videoDetails?.title), language: track.languageCode, auto: track.kind === 'asr', cues };
+    headers: { 'Content-Type': 'application/json', 'User-Agent': c.ua, 'Accept-Language': 'en-US,en;q=0.9', Origin: 'https://www.youtube.com' },
+    body: JSON.stringify({ context, videoId, contentCheckOk: true, racyCheckOk: true }),
+  }, { timeout: 4500 }));
+}
+async function pageCall(fetchImpl, videoId) {
+  const html = await getText(fetchImpl, `https://www.youtube.com/watch?v=${videoId}&hl=en&has_verified=1&bpctr=9999999999`, {
+    redirect: 'follow',
+    headers: { 'User-Agent': CHROME_UA, 'Accept-Language': 'en-US,en;q=0.9', Cookie: 'CONSENT=YES+cb.20240101-00-p0.en+FX+000; SOCS=CAI' },
+  }, { timeout: 4500, max: 8e6 });
+  return extractPlayerResponse(html);
+}
+const tag = (e) => { const m = /^HTTP (\d+)/.exec((e && e.message) || ''); return m ? m[1] : (e && e.name === 'TimeoutError') ? 'timeout' : 'gagal'; };
+
+async function fetchSubtitles(fetchImpl, videoId) {
+  const deadline = Date.now() + 8000, trace = [];
+  const left = () => Math.max(1000, Math.min(4000, deadline - Date.now()));
+  const calls = [...YT_CLIENTS.map((c) => ({ label: c.label, run: () => playerCall(fetchImpl, c, videoId) })), { label: 'PAGE', run: () => pageCall(fetchImpl, videoId) }];
+  const results = await Promise.all(calls.map(async (c) => { try { const info = await c.run(); return { label: c.label, info, note: info ? 'ok' : 'kosong' }; } catch (e) { return { label: c.label, info: null, note: tag(e) }; } }));
+  results.forEach((r) => trace.push(r.label + ':' + r.note));
+  const got = results.filter((r) => r.info && typeof r.info === 'object');
+  if (!got.length) return { error: 'UPSTREAM', trace };
+
+  const title = cleanText(got.map((r) => r.info.videoDetails && r.info.videoDetails.title).find(Boolean));
+  const sources = got.map((r) => ({ label: r.label, tracks: r.info?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [] })).filter((s) => s.tracks.length);
+  if (!sources.length) {
+    const okPlay = got.some((r) => r.info.playabilityStatus && r.info.playabilityStatus.status === 'OK');
+    const bot = got.some((r) => r.info.playabilityStatus && r.info.playabilityStatus.status === 'LOGIN_REQUIRED' && /bot|sign in/i.test(String(r.info.playabilityStatus.reason || '')));
+    return { error: bot && !okPlay ? 'BOT_BLOCK' : 'NO_SUBTITLE', trace };
+  }
+
+  const key = (t) => (t.languageCode || '') + '|' + (t.kind || '');
+  outer: for (const t of orderTracks(sources[0].tracks).slice(0, 3)) {
+    for (const s of sources) {
+      const tt = s.tracks.find((x) => key(x) === key(t)); if (!tt || !tt.baseUrl) continue;
+      for (const fmt of ['json3', null, 'vtt']) {
+        if (Date.now() > deadline) break outer;
+        const lbl = `${s.label}/${t.languageCode}/${fmt || 'xml'}`;
+        try {
+          const cues = parseCaption(await getText(fetchImpl, captionUrl(tt.baseUrl, fmt), { headers: { 'User-Agent': CHROME_UA, 'Accept-Language': 'en-US,en;q=0.9' } }, { timeout: left() }));
+          if (cues.length) return { ok: true, videoId, title, language: t.languageCode, auto: t.kind === 'asr', cues };
+          trace.push(lbl + ':kosong');
+        } catch (e) { trace.push(lbl + ':' + tag(e)); }
+      }
+    }
+  }
+  return { error: 'BOT_BLOCK', trace };
 }
 
 // ---------- Kana & romaji ----------
@@ -273,7 +382,7 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
         if (v.error) return fail(400, v.error);
         let out;
         try { out = await fetchSubtitles(fetchImpl, v.id); } catch { return fail(502, 'UPSTREAM'); }
-        return out.error ? send(200, { ok: false, code: out.error, message: MSG[out.error] }) : send(200, out);
+        return out.error ? send(out.error === 'UPSTREAM' ? 502 : 200, { ok: false, code: out.error, message: MSG[out.error], trace: (out.trace || []).join(' ').slice(0, 400) }) : send(200, out);
       }
 
       if (req.method === 'POST' && url.pathname === '/api/highlight') {
@@ -307,7 +416,7 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
   });
 }
 
-module.exports = { createServer, extractVideoId, parseJson3, pickTrack, captionUrl, cleanText, buildCard, cleanInput, toRomaji, toHiragana, candidates, partsOf };
+module.exports = { createServer, parseXml, parseVtt, parseCaption, extractPlayerResponse, orderTracks, fetchSubtitles, extractVideoId, parseJson3, pickTrack, captionUrl, cleanText, buildCard, cleanInput, toRomaji, toHiragana, candidates, partsOf };
 
 if (require.main === module) {
   createServer().listen(PORT, () => {
