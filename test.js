@@ -170,5 +170,25 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
     await withServer({ fetchImpl: denied }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.code, 'BOT_BLOCK'); assert.ok(r.body.trace.includes('kosong')); });
   });
 
+  await ok('Layanan Supadata: dipakai bila ada kunci, pilih Jepang, hemat kuota (cache), kuota habis dilaporkan', async () => {
+    const calls = [];
+    const f = async (url, o) => {
+      const u = new URL(String(url));
+      if (u.hostname !== 'api.supadata.ai') throw new Error('tidak boleh ke YouTube');
+      assert.strictEqual(o.headers['x-api-key'], 'KUNCI'); calls.push(u.searchParams.get('lang'));
+      if (u.searchParams.get('lang') === 'ja') return resp(200, { lang: 'ja', availableLangs: ['en', 'ja'], content: [{ text: 'こんにちは', offset: 1000, duration: 2000, lang: 'ja' }] });
+      return resp(200, { lang: 'en', availableLangs: ['en', 'ja'], content: [{ text: 'hello', offset: 0, duration: 1000, lang: 'en' }] });
+    };
+    await withServer({ fetchImpl: f, supadataKey: 'KUNCI' }, async (b) => {
+      const r = await getJson(b, link); assert.strictEqual(r.body.ok, true); assert.strictEqual(r.body.language, 'ja'); assert.strictEqual(r.body.cues[0].start, 1); assert.strictEqual(r.body.cues[0].end, 3);
+      assert.deepStrictEqual(calls, [null, 'ja']);
+      await getJson(b, link); assert.strictEqual(calls.length, 2);
+    });
+    const q = async (url) => { if (new URL(String(url)).hostname === 'api.supadata.ai') return resp(429, {}); throw new Error('x'); };
+    await withServer({ fetchImpl: q, supadataKey: 'KUNCI' }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.code, 'QUOTA'); });
+    const none = async () => resp(206, { error: 'transcript-unavailable' });
+    await withServer({ fetchImpl: none, supadataKey: 'KUNCI' }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.code, 'NO_SUBTITLE'); });
+  });
+
   console.log('\n' + passed + ' tes lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ', semua aman'));
 })();
