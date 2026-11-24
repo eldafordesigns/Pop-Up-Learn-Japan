@@ -1,0 +1,9 @@
+{
+  "name": "belajar-jepang",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Belajar kosakata Jepang dari video YouTube (gratis)",
+  "scripts": { "start": "node server.js", "test": "node test.js" },
+  "dependencies": { "kuromoji": "0.1.2" },
+  "engines": { "node": ">=18" }
+}
