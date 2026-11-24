@@ -156,6 +156,26 @@ details[open] summary::after{transform:rotate(45deg)}
 .btns button:first-child{background:#fff;color:#5b3fd6;box-shadow:0 10px 24px rgba(40,20,120,.3)}
 .speak{background:rgba(255,255,255,.22);border:1px solid rgba(255,255,255,.5);box-shadow:none;min-height:46px;margin-top:8px}
 
+/* ---------- Bar durasi ---------- */
+.seek{display:flex;align-items:center;gap:12px;margin:14px 2px 0;font-size:.85rem;font-weight:600;font-variant-numeric:tabular-nums}
+.seek span{min-width:3.4em}.seek span:last-child{text-align:right}
+.seek input[type=range]{-webkit-appearance:none;appearance:none;flex:1;min-height:32px;padding:0;border:0;border-radius:99px;background:transparent;box-shadow:none;cursor:pointer;touch-action:pan-y}
+.seek input[type=range]:focus{background:transparent;box-shadow:none}
+.seek input[type=range]:disabled{opacity:.5;cursor:default}
+.seek input[type=range]::-webkit-slider-runnable-track{height:8px;border-radius:99px;background:linear-gradient(90deg,#fff var(--pct,0%),rgba(255,255,255,.3) var(--pct,0%))}
+.seek input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;margin-top:-7px;border-radius:50%;background:#fff;border:0;box-shadow:0 2px 10px rgba(60,30,160,.5)}
+.seek input[type=range]::-moz-range-track{height:8px;border-radius:99px;background:rgba(255,255,255,.3)}
+.seek input[type=range]::-moz-range-progress{height:8px;border-radius:99px;background:#fff}
+.seek input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:#fff;border:0;box-shadow:0 2px 10px rgba(60,30,160,.5)}
+
+/* ---------- Tabel kana + ejaan ---------- */
+.kt{display:flex;flex-wrap:wrap;gap:10px 16px;margin-top:8px}
+.kg{display:flex}
+.kc{min-width:46px;padding:0 6px;text-align:center;border:1px solid rgba(255,255,255,.6);margin-left:-1px;background:rgba(255,255,255,.1)}
+.kg .kc:first-child{margin-left:0}
+.kc b{display:block;font-size:1.6rem;font-weight:600;line-height:1.5}
+.kc i{display:block;font-style:normal;font-size:.8rem;font-weight:600;color:var(--acc2);border-top:1px solid rgba(255,255,255,.6);padding:2px 0}
+
 @media (max-width:480px){
   .row{flex-wrap:nowrap}
   button{padding:0 18px}
@@ -211,6 +231,7 @@ details[open] summary::after{transform:rotate(45deg)}
 
   <section id="stage" hidden>
     <div id="player" class="player"></div>
+    <div class="seek"><span id="tcur">0:00</span><input id="seekbar" type="range" min="0" max="1000" step="1" value="0" disabled aria-label="Posisi video"><span id="tdur">0:00</span></div>
     <div class="ctl"><button id="back" class="alt" aria-label="Mundur 10 detik">⏪ 10 dtk</button><button id="toggle" aria-label="Putar atau jeda">▶ Putar</button><button id="fwd" class="alt" aria-label="Maju 10 detik">10 dtk ⏩</button></div>
     <div class="card">
       <div class="set">
@@ -264,8 +285,8 @@ function ytId(raw) {
 }
 
 /* ---------- Pemutar ---------- */
-const ytAdapter = (y) => ({ play: () => y.playVideo(), pause: () => y.pauseVideo(), seekBy: (d) => y.seekTo(Math.max(0, y.getCurrentTime() + d), true), time: () => y.getCurrentTime(), playing: () => y.getPlayerState() === 1 });
-const vidAdapter = (v) => ({ play: () => { const r = v.play(); if (r && r.catch) r.catch(() => status('Video tidak bisa diputar. Periksa linknya.', true)); }, pause: () => v.pause(), seekBy: (d) => { v.currentTime = Math.max(0, v.currentTime + d); }, time: () => v.currentTime, playing: () => !v.paused && !v.ended });
+const ytAdapter = (y) => ({ play: () => y.playVideo(), pause: () => y.pauseVideo(), seekBy: (d) => y.seekTo(Math.max(0, y.getCurrentTime() + d), true), time: () => y.getCurrentTime(), dur: () => y.getDuration(), seek: (t) => y.seekTo(t, true), playing: () => y.getPlayerState() === 1 });
+const vidAdapter = (v) => ({ play: () => { const r = v.play(); if (r && r.catch) r.catch(() => status('Video tidak bisa diputar. Periksa linknya.', true)); }, pause: () => v.pause(), seekBy: (d) => { v.currentTime = Math.max(0, v.currentTime + d); }, time: () => v.currentTime, dur: () => v.duration, seek: (t) => { v.currentTime = t; }, playing: () => !v.paused && !v.ended });
 
 function loadYT() {
   if (ytLoading) return ytLoading;
@@ -367,6 +388,21 @@ $('back').onclick = () => P && P.seekBy(-10);
 $('fwd').onclick = () => P && P.seekBy(10);
 $('toggle').onclick = () => { if (!P || !$('sheet').hidden) return; P.playing() ? P.pause() : P.play(); };
 
+/* ---------- Bar durasi (bisa ditarik maju/mundur) ---------- */
+const sb = $('seekbar'); let seeking = false, seekHold = 0;
+const fmt = (s) => { s = Math.max(0, Math.floor(s || 0)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = String(s % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`; };
+const paintSeek = () => sb.style.setProperty('--pct', (sb.value / 10) + '%');
+sb.addEventListener('input', () => { seeking = true; paintSeek(); const d = P && P.dur(); if (d > 0) $('tcur').textContent = fmt(sb.value / 1000 * d); });
+sb.addEventListener('change', () => { const d = P && P.dur(); if (d > 0) { P.seek(sb.value / 1000 * d); seekHold = Date.now() + 700; } seeking = false; });
+sb.addEventListener('pointerup', () => setTimeout(() => { seeking = false; }, 80));
+setInterval(() => {
+  if (!P) return;
+  let d = 0, t = 0; try { d = P.dur(); t = P.time(); } catch (e) {}
+  const ok = d > 0 && isFinite(d); sb.disabled = !ok; $('tdur').textContent = ok ? fmt(d) : '0:00';
+  if (seeking || Date.now() < seekHold) return;
+  $('tcur').textContent = fmt(t); sb.value = ok ? Math.min(1000, t / d * 1000) : 0; paintSeek();
+}, 250);
+
 /* ---------- Penghitung waktu: hanya jalan saat video sedang diputar ---------- */
 setInterval(() => {
   if (!P) return;
@@ -388,12 +424,39 @@ function openSheet(on) { $('sheet').hidden = !on; if (on) $('again').focus(); }
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 function kanaBox(label, main, sub) { const d = el('div', 'kana'); d.append(el('small', '', label), el('b', '', main)); if (sub) { d.append(el('br'), el('span', '', sub)); } return d; }
 
+const KN = {};
+[['アイウエオ','a i u e o'],['カキクケコ','ka ki ku ke ko'],['ガギグゲゴ','ga gi gu ge go'],['サシスセソ','sa shi su se so'],['ザジズゼゾ','za ji zu ze zo'],['タチツテト','ta chi tsu te to'],['ダヂヅデド','da ji zu de do'],['ナニヌネノ','na ni nu ne no'],['ハヒフヘホ','ha hi fu he ho'],['バビブベボ','ba bi bu be bo'],['パピプペポ','pa pi pu pe po'],['マミムメモ','ma mi mu me mo'],['ヤユヨ','ya yu yo'],['ラリルレロ','ra ri ru re ro'],['ワヲン','wa o n'],['ヴ','vu']]
+  .forEach(([k, r]) => r.split(' ').forEach((x, i) => { KN[k[i]] = x; }));
+const SY = { ャ: 'a', ュ: 'u', ョ: 'o' }, SV = { ァ: 'a', ィ: 'i', ゥ: 'u', ェ: 'e', ォ: 'o' };
+const toKata = (c) => c.replace(/[\u3041-\u3096]/g, (x) => String.fromCharCode(x.charCodeAt(0) + 0x60));
+function moras(str) { // "らやまは" -> [{k:'ら',r:'ra'},...]; ゃゅょ & ッ & ー ikut digabung dengan benar
+  const o = [...str], ch = o.map(toKata), out = [];
+  for (let i = 0; i < ch.length; i++) {
+    const c = ch[i]; let r = KN[c], k = o[i];
+    if (c === 'ッ') { out.push({ k, r: '', d: 1 }); continue; }
+    if (c === 'ー') { const v = out.length ? out[out.length - 1].r.match(/[aiueo]$/) : null; out.push({ k, r: v ? v[0] : '' }); continue; }
+    if (r === undefined) { out.push({ k, r: '' }); continue; }
+    const n = ch[i + 1];
+    if (n && SY[n] && /[iu]$/.test(r) && r !== 'u') { r = ['shi', 'chi', 'ji'].includes(r) ? r.slice(0, -1) + SY[n] : r.slice(0, -1) + 'y' + SY[n]; k += o[++i]; }
+    else if (n && SV[n]) { const v = SV[n]; if (r === 'fu') r = 'f' + v; else if (r === 'vu') r = 'v' + v; else if (r === 'u') r = 'w' + v; else if (['shi', 'chi', 'ji'].includes(r)) r = r.slice(0, -1) + v; else if (r === 'te' || r === 'de') r = r[0] + v; else r = r.slice(0, -1) + v; k += o[++i]; }
+    out.push({ k, r });
+  }
+  out.forEach((m, i) => { if (m.d) { const n = out[i + 1]; m.r = n && n.r ? (n.r.startsWith('ch') ? 't' : n.r[0]) : ''; } });
+  return out;
+}
+function kanaTable(label, groups) { // groups: [[{k,r},...],...] -> kotak: tulisan Jepang di atas, ejaan di bawah
+  const d = el('div', 'kana'), w = el('div', 'kt'); d.append(el('small', '', label));
+  groups.forEach((g) => { if (!g.length) return; const gr = el('div', 'kg'); g.forEach((m) => { const c = el('div', 'kc'); c.append(el('b', '', m.k), el('i', '', m.r || '\u00a0')); gr.append(c); }); w.append(gr); });
+  d.append(w); return d;
+}
+
 function renderCard(j) {
   const c = j.card, body = $('cardBody'); body.replaceChildren();
   body.append(el('span', 'badge', c.type === 'single' ? 'KATA BARU' : 'FRASA BARU'), el('div', 'big', c.romaji), el('p', 'mean', `${c.meaningId} / ${c.meaningEn}`));
-  if (c.hiragana) body.append(kanaBox('Hiragana', c.hiragana));
-  if (c.katakana) body.append(kanaBox('Katakana', c.katakana));
-  if (c.kanji) body.append(kanaBox('Kanji', c.kanji));
+  const ps = c.parts || [];
+  if (c.hiragana) body.append(kanaTable('Hiragana', ps.length ? ps.map((p) => moras(p.reading)) : [moras(c.hiragana)]));
+  if (c.katakana) body.append(kanaTable('Katakana', ps.length ? ps.map((p) => moras(p.reading)) : [moras(c.katakana)]));
+  if (c.kanji) body.append(kanaTable('Kanji', ps.length ? [ps.map((p) => ({ k: p.kanji || p.reading, r: p.romaji }))] : [[{ k: c.kanji, r: String(c.romaji || '').toLowerCase() }]]));
   if (c.type === 'phrase') body.append(kanaBox('Per kata', c.readingWithRomaji, c.kanjiWithRomaji));
   const sp = el('button', 'speak', '🔊 Dengar'); sp.onclick = () => { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(c.kanji || c.hiragana || c.katakana); u.lang = 'ja-JP'; speechSynthesis.speak(u); } catch (e) {} };
   body.append(sp);
