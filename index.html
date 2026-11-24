@@ -48,6 +48,9 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--acc2);min-height:40px
     <div class="row"><input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/..."><button id="load">Muat</button></div>
     <p id="status" class="status" role="status"></p>
     <details id="pasteBox"><summary>Subtitle tidak terbaca? Tempel manual</summary>
+      <p class="status" style="margin:6px 0 8px">Cara cadangan tanpa batas kuota: 1) buka situs unduh subtitle, 2) unduh file .srt/.vtt, 3) pilih file itu di bawah.</p>
+      <div class="row" style="margin-bottom:6px"><button id="openDown" type="button" class="alt" style="flex:1">🌐 Buka DownSub</button><button id="openSave" type="button" class="alt" style="flex:1">🌐 Buka SaveSubs</button></div>
+      <p class="note" style="margin:0 0 10px">Link videomu otomatis disalin. Jika kolom di situs kosong, tempel saja (Ctrl+V). Hati-hati dengan iklan di situs itu: jangan pasang aplikasi atau ekstensi apa pun.</p>
       <label for="paste">Isi file subtitle (.srt atau .vtt)</label>
       <textarea id="paste" placeholder="Tempel isi subtitle di sini"></textarea>
       <label for="file" style="margin-top:8px">Atau pilih file subtitle (.srt / .vtt)</label><input id="file" type="file" accept=".srt,.vtt,.txt,text/*">
@@ -63,8 +66,10 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--acc2);min-height:40px
         <div><label for="every">Jeda sorotan (menit)</label><input id="every" type="number" min="0.5" max="60" step="0.5" value="3" inputmode="decimal"></div>
         <div><label for="wc">Kata per sorotan</label><select id="wc"><option value="1">1 kata</option><option value="2">2 kata</option><option value="3">3 kata</option></select></div>
       </div>
+      <button id="getSubs" class="alt" style="width:100%;margin-top:10px">📥 Ambil subtitle otomatis dari video</button>
       <button id="now" class="alt" style="width:100%;margin-top:10px">✨ Sorot kata sekarang</button>
       <p id="sub" class="sub"></p>
+      <p class="status">Subtitle hanya disimpan sementara di memori selama halaman ini terbuka, tidak disimpan di perangkat Anda.</p>
     </div>
   </section>
 </main>
@@ -135,6 +140,18 @@ function parseSubs(txt) {
   return cues.sort((x, y) => x.start - y.start);
 }
 
+/* ---------- Ambil subtitle otomatis (hanya di memori halaman ini; tidak disimpan di perangkat) ---------- */
+async function getSubs(raw) {
+  if (!ytId(raw)) return status('Ambil subtitle otomatis hanya untuk link YouTube. Untuk file video, tempel subtitle manual.', true);
+  status('⏳ Mengambil subtitle dari video…'); subs = null; acc = 0;
+  try {
+    const r = await (await fetch('/api/subtitles?url=' + encodeURIComponent(raw))).json();
+    if (r.ok) { subs = { cues: r.cues, lang: r.language, auto: r.auto }; status(`✅ Subtitle siap (bahasa: ${r.language}${r.auto ? ', otomatis' : ''}). Tekan Putar.`); }
+    else { status((r.message || 'Subtitle gagal dimuat.') + (r.trace ? ' [' + r.trace + ']' : ''), true); $('pasteBox').open = true; }
+  } catch (e) { status('Gagal mengambil subtitle. Periksa internet lalu coba lagi.', true); }
+}
+$('getSubs').onclick = () => getSubs($('link').value.trim());
+
 /* ---------- Memuat video ---------- */
 $('load').onclick = async () => {
   const raw = $('link').value.trim(); subs = null; shown = []; acc = 0; if (P) { try { P.pause(); } catch (e) {} }
@@ -144,15 +161,27 @@ $('load').onclick = async () => {
     if (id) {
       status('Memuat video dan subtitle…');
       P = await mountYouTube(id); $('stage').hidden = false;
-      const r = await (await fetch('/api/subtitles?url=' + encodeURIComponent(raw))).json();
-      if (r.ok) { subs = { cues: r.cues, lang: r.language, auto: r.auto }; status(`✅ Subtitle siap (bahasa: ${r.language}${r.auto ? ', otomatis' : ''}). Tekan Putar.`); }
-      else { status((r.message || 'Subtitle gagal dimuat.') + (r.trace ? ' [' + r.trace + ']' : ''), true); $('pasteBox').open = true; }
+      await getSubs(raw);
     } else if (/\.(mp4|webm|mov)(\?|#|$)/i.test(raw)) {
       P = mountVideo(raw); $('stage').hidden = false; status('Video dimuat. Tempel subtitle manual di bawah agar sorotan kata bisa jalan.'); $('pasteBox').open = true;
     } else status('Link belum didukung. Pakai link YouTube atau link file video (.mp4).', true);
   } catch (e) { status('Gagal memuat. Periksa internet lalu coba lagi.', true); }
 };
-$('file').onchange = async (e) => { const f = e.target.files[0]; if (f) { $('paste').value = (await f.text()).slice(0, 2000000); status('File dibaca. Tekan Pakai.'); } };
+function openSite(kind) {
+  const raw = $('link').value.trim();
+  if (/^https?:\/\//i.test(raw)) { try { navigator.clipboard.writeText(raw); } catch (e) {} }
+  const url = kind === 'down' ? (ytId(raw) ? 'https://subtitle.to/' + raw : 'https://downsub.com/') : 'https://savesubs.com/';
+  window.open(url, '_blank', 'noopener,noreferrer');
+  status('Link video disalin. Di situs itu: tempel link, unduh file .srt atau .vtt, lalu kembali ke sini dan pilih filenya.');
+}
+$('openDown').onclick = () => openSite('down');
+$('openSave').onclick = () => openSite('save');
+$('file').onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const txt = (await f.text()).slice(0, 2000000); $('paste').value = txt;
+  if (/[\u3040-\u30FF]/.test(txt)) $('pasteLang').value = 'ja';
+  $('usePaste').click(); e.target.value = '';
+};
 $('usePaste').onclick = () => {
   const cues = parseSubs($('paste').value);
   if (!cues.length) return status('Subtitle tidak terbaca. Pastikan isinya format .srt atau .vtt.', true);
