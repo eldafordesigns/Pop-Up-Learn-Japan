@@ -1,6 +1,7 @@
 'use strict';
 const assert = require('assert');
 const S = require('./dapur');
+const { parseXml, parseVtt, parseCaption, extractPlayerResponse } = S;
 const { createServer, extractVideoId, parseJson3, pickTrack, captionUrl, buildCard, cleanInput, toRomaji, toHiragana, candidates } = S;
 
 let passed = 0;
@@ -136,6 +137,38 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
   await ok('YouTube error: pesan sopan tanpa membocorkan detail', () => withServer({ fetchImpl: async () => { throw new Error('rahasia internal'); } }, async (b) => {
     const r = await getJson(b, link); assert.strictEqual(r.status, 502); assert.ok(!JSON.stringify(r.body).includes('rahasia'));
   }));
+
+  // ---- format subtitle & cadangan ----
+  const txtResp = (status, text) => ({ ok: status >= 200 && status < 300, status, text: async () => text });
+  await ok('Pembaca subtitle: XML lama, srv3, VTT (tanpa baris ganda), JSON, dan data halaman YouTube', () => {
+    const x = parseXml('<transcript><text start="1.5" dur="2">Halo &amp;#39;ok&amp;#39; &amp; dunia</text></transcript>');
+    assert.strictEqual(x[0].text, "Halo 'ok' & dunia"); assert.strictEqual(x[0].start, 1.5);
+    const y = parseCaption('<timedtext format="3"><body><p t="2000" d="1500"><s>kucing</s><s t="200"> lucu</s></p></body></timedtext>');
+    assert.strictEqual(y[0].text, 'kucing lucu'); assert.strictEqual(y[0].start, 2);
+    const v = parseVtt('WEBVTT\n\n00:00:01.000 --> 00:00:03.000 align:start\nhalo <c>dunia</c>\n\n00:00:03.000 --> 00:00:05.000\nhalo dunia\n\n00:00:05.000 --> 00:00:06.000\nbaru');
+    assert.deepStrictEqual(v.map((c) => c.text), ['halo dunia', 'baru']);
+    assert.strictEqual(parseCaption('1\n00:00:01,000 --> 00:00:02,000\nsrt ok')[0].text, 'srt ok');
+    assert.strictEqual(parseCaption('{"events":[{"tStartMs":0,"dDurationMs":1000,"segs":[{"utf8":"j"}]}]}')[0].text, 'j');
+    assert.strictEqual(parseCaption('').length, 0);
+    assert.deepStrictEqual(extractPlayerResponse('<script>var ytInitialPlayerResponse = {"a":{"b":"}{"},"captions":1};var x=1;</script>'), { a: { b: '}{' }, captions: 1 });
+  });
+  await ok('Cadangan: pintu aplikasi ditolak -> pakai halaman tonton; JSON kosong -> coba XML', () => {
+    const page = 'x<script>var ytInitialPlayerResponse = ' + JSON.stringify({ videoDetails: { title: 'Judul' }, captions: { playerCaptionsTracklistRenderer: { captionTracks: [T('ja', { kind: 'asr' })] } } }) + ';</script>';
+    const f = async (url) => {
+      const u = String(url);
+      if (u.includes('/youtubei/v1/player')) return txtResp(403, '');
+      if (u.includes('/watch?')) return txtResp(200, page);
+      if (u.includes('fmt=json3')) return txtResp(200, '');
+      return txtResp(200, '<timedtext><body><p t="1000" d="2000">こんにちは</p></body></timedtext>');
+    };
+    return withServer({ fetchImpl: f }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.ok, true); assert.strictEqual(r.body.language, 'ja'); assert.strictEqual(r.body.auto, true); assert.strictEqual(r.body.cues[0].text, 'こんにちは'); });
+  });
+  await ok('Diblokir bot / subtitle ditolak: pesan jelas + jejak singkat tanpa rahasia', async () => {
+    const bot = async (url) => String(url).includes('/youtubei/v1/player') ? resp(200, { playabilityStatus: { status: 'LOGIN_REQUIRED', reason: 'Sign in to confirm you’re not a bot' } }) : txtResp(200, '');
+    await withServer({ fetchImpl: bot }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.code, 'BOT_BLOCK'); assert.ok(r.body.message.includes('Tempel manual')); });
+    const denied = async (url) => String(url).includes('/youtubei/v1/player') ? resp(200, { captions: { playerCaptionsTracklistRenderer: { captionTracks: [T('en')] } } }) : txtResp(200, '');
+    await withServer({ fetchImpl: denied }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.code, 'BOT_BLOCK'); assert.ok(r.body.trace.includes('kosong')); });
+  });
 
   console.log('\n' + passed + ' tes lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ', semua aman'));
 })();
