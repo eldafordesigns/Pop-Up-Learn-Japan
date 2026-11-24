@@ -68,6 +68,7 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--acc2);min-height:40px
         <div><label for="wc">Kata per sorotan</label><select id="wc"><option value="1">1 kata</option><option value="2">2 kata</option><option value="3">3 kata</option></select></div>
       </div>
       <button id="getSubs" class="alt" style="width:100%;margin-top:10px">📥 Ambil subtitle otomatis dari video</button>
+      <p id="status2" class="status" role="status" style="margin-top:8px"></p>
       <button id="now" class="alt" style="width:100%;margin-top:10px">✨ Sorot kata sekarang</button>
       <p id="sub" class="sub"></p>
       <p class="status">Subtitle hanya disimpan sementara di memori selama halaman ini terbuka, tidak disimpan di perangkat Anda.</p>
@@ -92,7 +93,7 @@ try { const s = JSON.parse(localStorage.getItem('bj') || '{}'); if (s.every) $('
 const save = () => { try { localStorage.setItem('bj', JSON.stringify({ every: $('every').value, wc: $('wc').value })); } catch (e) {} };
 $('every').onchange = $('wc').onchange = save;
 
-function status(msg, err) { const s = $('status'); s.textContent = msg; s.className = 'status' + (err ? ' err' : ''); }
+function status(msg, err) { ['status', 'status2'].forEach((id) => { const s = $(id); if (s) { s.textContent = msg; s.className = 'status' + (err ? ' err' : ''); } }); }
 
 /* ---------- Link ---------- */
 function ytId(raw) {
@@ -154,13 +155,16 @@ function parseSubs(txt) {
 
 /* ---------- Ambil subtitle otomatis (hanya di memori halaman ini; tidak disimpan di perangkat) ---------- */
 async function getSubs(raw) {
-  if (!ytId(raw)) return status('Ambil subtitle otomatis hanya untuk link YouTube. Untuk file video, tempel subtitle manual.', true);
-  status('⏳ Mengambil subtitle dari video…'); subs = null; acc = 0;
+  if (!ytId(raw)) return status('Ambil subtitle otomatis hanya untuk link YouTube. Tempel link YouTube di kolom atas, atau pakai subtitle manual.', true);
+  const btn = $('getSubs'); btn.disabled = true; btn.textContent = '⏳ Mengambil subtitle…';
+  status('⏳ Mengambil subtitle dari video… (bisa sampai 20 detik)'); subs = null; acc = 0;
   try {
     const r = await (await fetch('/api/subtitles?url=' + encodeURIComponent(raw), { signal: AbortSignal.timeout(25000) })).json();
-    if (r.ok) { subs = { cues: r.cues, lang: r.language, auto: r.auto }; status(`✅ Subtitle siap (bahasa: ${r.language}${r.auto ? ', otomatis' : ''}). Tekan Putar.`); }
-    else { status((r.message || 'Subtitle gagal dimuat.') + (r.trace ? ' [' + r.trace + ']' : ''), true); $('pasteBox').open = true; }
-  } catch (e) { status('Gagal mengambil subtitle. Periksa internet lalu coba lagi.', true); }
+    if (r.ok) { subs = { cues: r.cues, lang: r.language, auto: r.auto }; status(`✅ BERHASIL: ${r.cues.length} baris subtitle (bahasa: ${r.language}${r.auto ? ', otomatis' : ''}). Tekan Putar.`); }
+    else { status('❌ GAGAL: ' + (r.message || 'Subtitle gagal dimuat.') + (r.trace ? ' [' + r.trace + ']' : ''), true); $('pasteBox').open = true; }
+  } catch (e) { status('❌ GAGAL: server tidak menjawab tepat waktu. Tunggu sebentar lalu tekan tombol lagi.', true); }
+  btn.disabled = false;
+  btn.textContent = subs ? `✅ Subtitle siap (${subs.cues.length} baris) · ambil ulang` : '📥 Ambil subtitle otomatis dari video';
 }
 $('getSubs').onclick = () => getSubs($('link').value.trim());
 
