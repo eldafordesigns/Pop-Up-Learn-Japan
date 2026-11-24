@@ -176,6 +176,12 @@ details[open] summary::after{transform:rotate(45deg)}
 .kc b{display:block;font-size:1.6rem;font-weight:600;line-height:1.5}
 .kc i{display:block;font-style:normal;font-size:.8rem;font-weight:600;color:var(--acc2);border-top:1px solid rgba(255,255,255,.6);padding:2px 0}
 
+/* ---------- Tombol tambah/kurang jeda (selalu terlihat) ---------- */
+.stepper{display:flex;gap:6px;align-items:center}
+.stepper button{flex:none;width:46px;min-height:50px;padding:0;font-size:1.4rem;line-height:1}
+.stepper input{text-align:center;min-width:0;padding:11px 4px;-moz-appearance:textfield;appearance:textfield}
+.stepper input::-webkit-outer-spin-button,.stepper input::-webkit-inner-spin-button{-webkit-appearance:none;appearance:none;margin:0;display:none}
+
 @media (max-width:480px){
   .row{flex-wrap:nowrap}
   button{padding:0 18px}
@@ -235,7 +241,7 @@ details[open] summary::after{transform:rotate(45deg)}
     <div class="ctl"><button id="back" class="alt" aria-label="Mundur 10 detik">⏪ 10 dtk</button><button id="toggle" aria-label="Putar atau jeda">▶ Putar</button><button id="fwd" class="alt" aria-label="Maju 10 detik">10 dtk ⏩</button></div>
     <div class="card">
       <div class="set">
-        <div><label for="every">Jeda sorotan (menit)</label><input id="every" type="number" min="0.5" max="60" step="0.5" value="3" inputmode="decimal"></div>
+        <div><label for="every">Jeda sorotan (menit)</label><div class="stepper"><button id="evDec" type="button" class="alt" aria-label="Kurangi jeda">−</button><input id="every" type="number" min="0.5" max="60" step="0.5" value="3" inputmode="decimal"><button id="evInc" type="button" class="alt" aria-label="Tambah jeda">+</button></div></div>
         <div><label for="wc">Kata per sorotan</label><select id="wc"><option value="1">1 kata</option><option value="2">2 kata</option><option value="3">3 kata</option></select></div>
       </div>
       <button id="getSubs" class="alt" style="width:100%;margin-top:14px">📥 Ambil subtitle otomatis dari video</button>
@@ -271,6 +277,15 @@ let P = null, subs = null, acc = 0, busy = false, shown = [], ytLoading = null;
 try { const s = JSON.parse(localStorage.getItem('bj') || '{}'); if (s.every) $('every').value = s.every; if (s.wc) $('wc').value = s.wc; } catch (e) {}
 const save = () => { try { localStorage.setItem('bj', JSON.stringify({ every: $('every').value, wc: $('wc').value })); } catch (e) {} };
 $('every').onchange = $('wc').onchange = save;
+function stepEvery(d) {
+  const v = Number($('every').value) || 3;
+  $('every').value = Math.min(60, Math.max(0.5, Math.round((v + d) * 2) / 2));
+  save();
+}
+$('evDec').onclick = () => stepEvery(-0.5);
+$('evInc').onclick = () => stepEvery(0.5);
+// batas waktu yang aman untuk iPhone/Safari lama (AbortSignal.timeout belum ada di sana)
+const timeoutSignal = (ms) => { if (window.AbortSignal && AbortSignal.timeout) return AbortSignal.timeout(ms); const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; };
 
 function status(msg, err) { ['status', 'status2'].forEach((id) => { const s = $(id); if (s) { s.textContent = msg; s.className = 'status' + (err ? ' err' : ''); } }); }
 
@@ -338,7 +353,7 @@ async function getSubs(raw) {
   const btn = $('getSubs'); btn.disabled = true; btn.textContent = '⏳ Mengambil subtitle…';
   status('⏳ Mengambil subtitle dari video… (bisa sampai 20 detik)'); subs = null; acc = 0;
   try {
-    const r = await (await fetch('/api/subtitles?url=' + encodeURIComponent(raw), { signal: AbortSignal.timeout(25000) })).json();
+    const r = await (await fetch('/api/subtitles?url=' + encodeURIComponent(raw), { signal: timeoutSignal(25000) })).json();
     if (r.ok) { subs = { cues: r.cues, lang: r.language, auto: r.auto }; status(`✅ BERHASIL: ${r.cues.length} baris subtitle (bahasa: ${r.language}${r.auto ? ', otomatis' : ''}). Tekan Putar.`); }
     else { status('❌ GAGAL: ' + (r.message || 'Subtitle gagal dimuat.') + (r.trace ? ' [' + r.trace + ']' : ''), true); $('pasteBox').open = true; }
   } catch (e) { status('❌ GAGAL: server tidak menjawab tepat waktu. Tunggu sebentar lalu tekan tombol lagi.', true); }
@@ -404,13 +419,17 @@ setInterval(() => {
 }, 250);
 
 /* ---------- Penghitung waktu: hanya jalan saat video sedang diputar ---------- */
+// Dihitung dari kemajuan waktu VIDEO (bukan jumlah detik jam), jadi tetap akurat di iPhone
+// walau status pemutar tidak terbaca dengan benar atau timer browser diperlambat.
+let lastT = null;
 setInterval(() => {
   if (!P) return;
-  let playing = false; try { playing = P.playing(); } catch (e) {}
+  let playing = false, t = 0; try { playing = P.playing(); t = P.time() || 0; } catch (e) {}
   $('toggle').textContent = playing ? '⏸ Jeda' : '▶ Putar';
-  if (subs) { const t = P.time(), c = subs.cues.filter((x) => x.start <= t && x.end >= t)[0]; $('sub').textContent = c ? c.text : ''; }
-  if (!playing || !$('sheet').hidden || !subs || busy) return;
-  acc += 0.5;
+  if (subs) { const c = subs.cues.filter((x) => x.start <= t && x.end >= t)[0]; $('sub').textContent = c ? c.text : ''; }
+  const dt = lastT == null ? 0 : t - lastT; lastT = t;
+  if (!$('sheet').hidden || !subs || busy) return;
+  if (dt > 0 && dt < 2) acc += dt; // lompatan (geser bar) tidak dihitung
   if (acc >= Math.max(0.5, Number($('every').value) || 3) * 60) highlight();
 }, 500);
 
@@ -467,7 +486,7 @@ function renderMsg(text) { $('cardBody').replaceChildren(el('p', 'note', text));
 async function highlight() {
   if (!P || busy) return;
   if (!subs || !subs.cues.length) return status('Belum ada subtitle. Muat video yang punya subtitle atau tempel manual.', true);
-  busy = true; try { P.pause(); } catch (e) {}
+  busy = true; acc = 0; try { P.pause(); } catch (e) {}
   openSheet(true); renderMsg('⏳ Mencari kata untukmu…');
   try {
     const r = await fetch('/api/highlight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: pickLines(), sourceLang: subs.lang, wordCount: Number($('wc').value), exclude: shown.slice(-40) }) });
