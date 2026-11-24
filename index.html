@@ -50,6 +50,7 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--acc2);min-height:40px
     <details id="pasteBox"><summary>Subtitle tidak terbaca? Tempel manual</summary>
       <label for="paste">Isi file subtitle (.srt atau .vtt)</label>
       <textarea id="paste" placeholder="Tempel isi subtitle di sini"></textarea>
+      <label for="file" style="margin-top:8px">Atau pilih file subtitle (.srt / .vtt)</label><input id="file" type="file" accept=".srt,.vtt,.txt,text/*">
       <div class="row" style="margin-top:8px"><select id="pasteLang" aria-label="Bahasa subtitle"><option value="ja">Jepang</option><option value="id">Indonesia</option><option value="en">Inggris</option></select><button id="usePaste" class="alt">Pakai</button></div>
     </details>
   </section>
@@ -145,12 +146,13 @@ $('load').onclick = async () => {
       P = await mountYouTube(id); $('stage').hidden = false;
       const r = await (await fetch('/api/subtitles?url=' + encodeURIComponent(raw))).json();
       if (r.ok) { subs = { cues: r.cues, lang: r.language, auto: r.auto }; status(`✅ Subtitle siap (bahasa: ${r.language}${r.auto ? ', otomatis' : ''}). Tekan Putar.`); }
-      else { status(r.message || 'Subtitle gagal dimuat.', true); $('pasteBox').open = true; }
+      else { status((r.message || 'Subtitle gagal dimuat.') + (r.trace ? ' [' + r.trace + ']' : ''), true); $('pasteBox').open = true; }
     } else if (/\.(mp4|webm|mov)(\?|#|$)/i.test(raw)) {
       P = mountVideo(raw); $('stage').hidden = false; status('Video dimuat. Tempel subtitle manual di bawah agar sorotan kata bisa jalan.'); $('pasteBox').open = true;
     } else status('Link belum didukung. Pakai link YouTube atau link file video (.mp4).', true);
   } catch (e) { status('Gagal memuat. Periksa internet lalu coba lagi.', true); }
 };
+$('file').onchange = async (e) => { const f = e.target.files[0]; if (f) { $('paste').value = (await f.text()).slice(0, 2000000); status('File dibaca. Tekan Pakai.'); } };
 $('usePaste').onclick = () => {
   const cues = parseSubs($('paste').value);
   if (!cues.length) return status('Subtitle tidak terbaca. Pastikan isinya format .srt atau .vtt.', true);
