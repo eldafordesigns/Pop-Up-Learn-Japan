@@ -130,6 +130,7 @@ details[open] summary::after{transform:rotate(45deg)}
 .player iframe,.player video{position:absolute;inset:0;width:100%;height:100%;border:0}
 .ctl{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:10px;margin:14px 0 18px}
 .ctl button{min-height:62px;font-size:1rem}
+.ctl button:disabled{cursor:not-allowed;opacity:.45}
 #toggle{background:var(--grad-hot);box-shadow:0 12px 28px rgba(255,110,130,.45)}
 .set{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .sub{min-height:3em;margin:14px 0 0;padding:12px 16px;border-radius:18px;background:rgba(255,255,255,.12);color:#fff;font-size:.98rem}
@@ -218,11 +219,11 @@ details[open] summary::after{transform:rotate(45deg)}
 
   <section class="hero">
     <h1><b>Belajar</b><span class="jp">Jepang</span> dari Video</h1>
-    <p>Tempel link video atau file .mp4, lalu temukan kata baru di sela-sela video favoritmu.</p>
+    <p>Tempel link video, file .mp4, atau link pemutar situs lain, lalu temukan kata baru di sela-sela video favoritmu.</p>
   </section>
 
   <section class="card">
-    <label for="link">Link video (YouTube atau file .mp4)</label>
+    <label for="link">Link video (YouTube, .mp4, AnimeEmbed, VidRift, atau situs lain)</label>
     <div class="row"><input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/..."><button id="load">Muat</button></div>
     <p id="status" class="status" role="status"></p>
     <details id="pasteBox"><summary>Subtitle tidak terbaca? Tempel manual</summary>
@@ -332,6 +333,113 @@ function mountVideo(src) {
   $('player').replaceChildren(v); return vidAdapter(v);
 }
 
+/* ---------- Sumber tambahan: pemutar iframe ber-API (AnimeEmbed, VidRift) + jendela situs lain ----------
+   Semua sumber memakai antarmuka adapter yang SAMA dengan YouTube/MP4 (play, pause, seekBy, time, dur, seek, playing),
+   jadi pop-up, jeda otomatis, PLAY AGAIN, NEXT, subtitle, dan bar durasi tidak tahu dan tidak perlu tahu sumbernya. */
+const IFRAME_ALLOW = 'autoplay; fullscreen; picture-in-picture; encrypted-media';
+const WINDOW_MSG = 'Situs ini tampil sebagai jendela. Browser melarang aplikasi mengontrol player situs lain, jadi jeda otomatis TIDAK tersedia di sumber ini (untuk jeda otomatis pakai link embed AnimeEmbed atau VidRift). Tombol ✨ tetap bisa dipakai. Jika kotak pemutar kosong, situs itu melarang disematkan.';
+
+function classifyEmbed(raw) {
+  let u; try { u = new URL(raw); } catch (e) { return null; }
+  if (u.protocol !== 'https:') return null; // http tidak bisa dimuat di dalam halaman https
+  const h = u.hostname.toLowerCase();
+  if (h === 'animeembed.com' && /^\/embed(\/|$|\?)/.test(u.pathname + u.search)) return { kind: 'animeembed', url: u.href, origin: u.origin };
+  if ((h === 'embed.vidrift.net' || h === 'embed.vidrift.in') && /^\/embed\//.test(u.pathname)) return { kind: 'vidrift', url: u.href, origin: u.origin };
+  return { kind: 'window', url: u.href, origin: u.origin };
+}
+
+function mountFrame(src) {
+  const f = document.createElement('iframe');
+  f.title = 'Pemutar video'; f.allow = IFRAME_ALLOW; f.referrerPolicy = 'strict-origin-when-cross-origin';
+  f.setAttribute('allowfullscreen', ''); // tanpa atribut sandbox: AnimeEmbed dan VidRift menolak diputar di iframe ber-sandbox
+  f.src = src; $('player').replaceChildren(f);
+  return f;
+}
+// Pemutar iframe hanya melapor waktu tiap ~5 detik; jam ini menghaluskannya di antara laporan (dikoreksi tiap laporan baru).
+function makeClock() {
+  const c = { t: 0, at: 0, dur: 0, run: false, stalled: false };
+  c.now = () => { const t = c.t + (c.run && !c.stalled ? (performance.now() - c.at) / 1000 : 0); return c.dur > 0 ? Math.min(t, c.dur) : t; };
+  c.set = (t, d) => { if (typeof t === 'number' && isFinite(t)) { c.t = t; c.at = performance.now(); } if (typeof d === 'number' && d > 0 && isFinite(d)) c.dur = d; };
+  c.mode = (run, stalled) => { c.t = c.now(); c.at = performance.now(); c.run = run; c.stalled = !!stalled; };
+  return c;
+}
+function listenFrame(frame, origin, fn) {
+  const h = (e) => { if (e.source === frame.contentWindow && e.origin === origin && e.data) fn(e.data); };
+  addEventListener('message', h); return () => removeEventListener('message', h);
+}
+function embedStatus(name) { status(`✅ ${name} tersambung: jeda & lanjut otomatis aktif.` + (subs ? ` ${subs.cues.length} baris subtitle dipakai.` : ' Tempel subtitle .srt/.vtt (Jepang) di bawah agar sorotan kata bisa jalan.')); }
+
+/* AnimeEmbed: event lewat postMessage (channel "animeembed", versi 1), perintah lewat SDK resmi mereka. */
+let aeSdk = null;
+function loadAnimeEmbedSdk() {
+  if (window.AnimeEmbed && window.AnimeEmbed.connect) return Promise.resolve();
+  if (aeSdk) return aeSdk;
+  aeSdk = new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://animeembed.com/assets/sdk.js'; s.onload = res; s.onerror = () => { aeSdk = null; rej(new Error('sdk')); }; document.head.appendChild(s); });
+  return aeSdk;
+}
+async function mountAnimeEmbed(info) {
+  await loadAnimeEmbedSdk();
+  const f = mountFrame(info.url), clk = makeClock(), sdk = window.AnimeEmbed.connect(f); let heard = false;
+  const off = listenFrame(f, info.origin, (m) => {
+    if (m.channel !== 'animeembed' || m.version !== 1) return;
+    const d = m.data || {};
+    if (!heard) { heard = true; embedStatus('AnimeEmbed'); }
+    if (m.event === 'play') clk.mode(true, false);
+    else if (m.event === 'pause' || m.event === 'ended') { if (typeof d.currentTime === 'number') clk.set(d.currentTime, d.duration); clk.mode(false, false); }
+    else if (m.event === 'buffering') clk.mode(clk.run, true);
+    else if (m.event === 'progress') { const was = clk.now(); clk.set(d.currentTime, d.duration); if (!clk.run && d.currentTime > was + 0.5) clk.run = true; clk.stalled = false; }
+    else if (m.event === 'error') status('Pemutar AnimeEmbed melapor error: ' + (d.message || 'tidak diketahui') + '.', true);
+  });
+  setTimeout(() => { if (!heard && P && P.destroy === destroy) status('Pemutar AnimeEmbed belum mengirim sinyal apa pun. Periksa link embed-nya, atau muat ulang. Kontrol otomatis belum tersambung.', true); }, 15000);
+  const send = (name, args, undo) => { let r; try { r = sdk.command(name, args); } catch (e) { r = Promise.reject(e); } if (r && r.catch) r.catch((e) => { if (undo) undo(); status('Pemutar menolak perintah "' + name + '"' + (e && e.message ? ': ' + e.message : '') + '. Klik sekali di dalam pemutar lalu coba lagi.', true); }); };
+  const seek = (t) => { t = Math.max(0, t); clk.set(t); send('seek', { time: t }); };
+  const destroy = () => { off(); try { sdk.destroy && sdk.destroy(); } catch (e) {} };
+  return { play: () => { clk.mode(true, false); send('play', undefined, () => clk.mode(false, false)); }, pause: () => { clk.mode(false, false); send('pause'); }, seekBy: (d) => seek(clk.now() + d), seek, time: () => clk.now(), dur: () => clk.dur, playing: () => clk.run, destroy };
+}
+
+/* VidRift: semuanya lewat postMessage (pesan "vidrift:*"). */
+function mountVidRift(info) {
+  const f = mountFrame(info.url), clk = makeClock(); let heard = false;
+  const post = (msg) => { try { f.contentWindow.postMessage(msg, info.origin); } catch (e) {} };
+  const off = listenFrame(f, info.origin, (m) => {
+    if (typeof m.type !== 'string' || m.type.indexOf('vidrift:') !== 0) return;
+    if (!heard) { heard = true; embedStatus('VidRift'); }
+    if (m.type === 'vidrift:state') { clk.set(m.currentTime, m.duration); clk.mode(!m.paused, false); }
+    else if (m.type === 'vidrift:progress') { clk.set(m.currentTime, m.duration); clk.mode(true, false); }
+    else if (m.type === 'vidrift:unpaused') { clk.set(m.currentTime); clk.mode(true, false); }
+    else if (m.type === 'vidrift:paused' || m.type === 'vidrift:ended') { clk.set(m.currentTime); clk.mode(false, false); }
+    else if (m.type === 'vidrift:wont-play') status('VidRift: semua sumber gagal memutar judul ini' + (m.reason ? ' (' + m.reason + ')' : '') + '. Coba episode/judul lain.', true);
+    else if (m.type === 'vidrift:command-error') {
+      if (m.command === 'vidrift:play') clk.mode(false, false);
+      status(m.reason === 'click-required' ? 'VidRift meminta satu klik penonton di dalam pemutar sebelum bisa dilanjutkan. Klik video sekali lalu lanjutkan.' : 'VidRift menolak perintah ' + (m.command || '') + (m.reason ? ' (' + m.reason + ')' : '') + '.', true);
+    }
+  });
+  const onLoad = () => { clk.set(0); clk.mode(false, false); post({ type: 'vidrift:get-state' }); }; // dipanggil lagi bila pemutar ganti episode (iframe dimuat ulang)
+  f.addEventListener('load', onLoad);
+  setTimeout(() => { if (!heard && P && P.destroy === destroy) status('Pemutar VidRift belum mengirim sinyal apa pun. Periksa link embed-nya, atau muat ulang. Kontrol otomatis belum tersambung.', true); }, 15000);
+  const seek = (t) => { t = Math.max(0, t); clk.set(t); post({ type: 'vidrift:resume', currentTime: t }); };
+  const destroy = () => { off(); f.removeEventListener('load', onLoad); };
+  return { play: () => { clk.mode(true, false); post({ type: 'vidrift:play' }); }, pause: () => { clk.mode(false, false); post({ type: 'vidrift:pause' }); }, seekBy: (d) => seek(clk.now() + d), seek, time: () => clk.now(), dur: () => clk.dur, playing: () => clk.run, destroy };
+}
+
+/* Situs lain: tampil sebagai jendela (player asli situs itu). Tidak ada kontrol lintas-origin, dan itu dilaporkan apa adanya. */
+function mountWindow(info) {
+  mountFrame(info.url);
+  const noop = () => {};
+  return { viewOnly: true, play: noop, pause: noop, seekBy: noop, seek: noop, time: () => 0, dur: () => 0, playing: () => false, destroy: noop };
+}
+function setCtl(on) { ['toggle', 'back', 'fwd'].forEach((k) => { $(k).disabled = !on; }); }
+async function loadEmbed(emb) {
+  status('Memuat pemutar…'); $('stage').hidden = false;
+  if (emb.kind === 'animeembed') {
+    try { P = await mountAnimeEmbed(emb); } catch (e) { return status('Gagal memuat SDK kontrol AnimeEmbed (animeembed.com/assets/sdk.js). Periksa internet atau pemblokir iklan, lalu tekan Muat lagi.', true); }
+    status('⏳ Pemutar AnimeEmbed dimuat. Menunggu sambungan kontrol…');
+  }
+  else if (emb.kind === 'vidrift') { P = mountVidRift(emb); status('⏳ Pemutar VidRift dimuat. Menunggu sambungan kontrol…'); }
+  else { P = mountWindow(emb); setCtl(false); status(WINDOW_MSG, false, true); }
+  $('pasteBox').open = true;
+}
+
 /* ---------- Subtitle manual (.srt / .vtt) ---------- */
 function parseTime(s) { const m = s.trim().match(/(?:(\d+):)?(\d+):(\d+)[.,](\d+)/); return m ? Number(m[1] || 0) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number('0.' + m[4]) : NaN; }
 function parseSubs(txt) {
@@ -357,7 +465,7 @@ async function getSubs(raw) {
 
 /* ---------- Memuat video ---------- */
 $('load').onclick = async () => {
-  const raw = $('link').value.trim(); subs = null; shown = []; acc = 0; if (P) { try { P.pause(); } catch (e) {} }
+  const raw = $('link').value.trim(); subs = null; shown = []; acc = 0; if (P) { try { P.pause(); } catch (e) {} if (P.destroy) { try { P.destroy(); } catch (e) {} P = null; } } setCtl(true);
   if (!/^https?:\/\//i.test(raw)) return status('Tempel link yang dimulai dengan https://', true);
   const id = ytId(raw);
   try {
@@ -367,7 +475,10 @@ $('load').onclick = async () => {
       await getSubs(raw);
     } else if (/\.(mp4|webm|mov)(\?|#|$)/i.test(raw)) {
       P = mountVideo(raw); $('stage').hidden = false; status('Video dimuat. Tempel subtitle manual di bawah agar sorotan kata bisa jalan.'); $('pasteBox').open = true;
-    } else status('Link belum didukung. Pakai link video atau link file video (.mp4).', true);
+    } else {
+      const emb = classifyEmbed(raw);
+      if (emb) await loadEmbed(emb); else status('Link belum didukung. Pakai link https:// (YouTube, file .mp4, atau halaman pemutar video).', true);
+    }
   } catch (e) { status(e && e.message === 'timeout' ? 'Pemutar YouTube tidak merespons. Coba video lain, matikan pemblokir iklan untuk situs ini, atau muat ulang dengan Ctrl+F5.' : 'Gagal memuat. Periksa internet lalu coba lagi.', true); }
 };
 function openSite(kind) {
