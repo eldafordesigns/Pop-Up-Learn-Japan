@@ -182,6 +182,16 @@ details[open] summary::after{transform:rotate(45deg)}
 .stepper input{text-align:center;min-width:0;padding:11px 4px;-moz-appearance:textfield;appearance:textfield}
 .stepper input::-webkit-outer-spin-button,.stepper input::-webkit-inner-spin-button{-webkit-appearance:none;appearance:none;margin:0;display:none}
 
+/* ---------- Mode situs asli / layar penuh ---------- */
+.player.tall{aspect-ratio:auto;height:68dvh;min-height:320px}
+body.fs #stage{animation:none!important;transform:none!important}
+.player.full{position:fixed;inset:0;z-index:5;width:100%;height:100dvh;aspect-ratio:auto;border-radius:0;margin:0;border:0}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 4px}.toolbar button{flex:1 1 auto;min-height:44px;padding:0 14px;font-size:.85rem}
+.blocked{position:absolute;inset:0;overflow:auto;padding:18px;background:rgba(40,20,120,.62)}
+.blocked h3{margin:0 0 8px;font-size:1.05rem}.blocked ul{margin:6px 0 10px;padding-left:20px;font-size:.88rem}.blocked li{margin:4px 0}
+.blocked .tips{margin:10px 0 0;font-weight:700;font-size:.85rem}.blocked .row{margin-top:10px}.blocked .row button{flex:1;min-height:46px;font-size:.85rem;padding:0 10px}
+#fsbar{position:fixed;z-index:6;right:10px;top:calc(env(safe-area-inset-top) + 10px);display:flex;gap:8px}
+#fsbar button{min-height:44px;width:44px;padding:0;font-size:1.05rem;opacity:.85}
 @media (max-width:480px){
   .row{flex-wrap:nowrap}
   button{padding:0 18px}
@@ -217,12 +227,12 @@ details[open] summary::after{transform:rotate(45deg)}
 
   <section class="hero">
     <h1><b>Belajar</b>Jepang dari Video</h1>
-    <p>Tempel link YouTube atau file .mp4, lalu temukan kata baru di sela-sela video favoritmu.</p>
+    <p>Tempel link YouTube, file video (.mp4 / .webm / .m3u8), Vimeo, Dailymotion, atau website video lain, lalu temukan kata baru di sela-sela tontonanmu.</p>
   </section>
 
   <section class="card">
-    <label for="link">Link video (YouTube atau file .mp4)</label>
-    <div class="row"><input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/..."><button id="load">Muat</button></div>
+    <label for="link">Link video atau website</label>
+    <div class="row"><input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://..."><button id="load">Muat</button></div>
     <p id="status" class="status" role="status"></p>
     <details id="pasteBox"><summary>Subtitle tidak terbaca? Tempel manual</summary>
       <p class="status" style="margin:6px 0 8px">Cara cadangan tanpa batas kuota: 1) buka situs unduh subtitle, 2) unduh file .srt/.vtt, 3) pilih file itu di bawah.</p>
@@ -237,8 +247,10 @@ details[open] summary::after{transform:rotate(45deg)}
 
   <section id="stage" hidden>
     <div id="player" class="player"></div>
+    <div id="siteBar" class="toolbar" hidden><button id="fsBtn" type="button" class="alt">⛶ Layar penuh</button><button id="tabBtn" type="button" class="alt">↗ Buka di tab baru</button><button id="reBtn" type="button" class="alt">🔄 Muat ulang</button></div>
     <div class="seek"><span id="tcur">0:00</span><input id="seekbar" type="range" min="0" max="1000" step="1" value="0" disabled aria-label="Posisi video"><span id="tdur">0:00</span></div>
     <div class="ctl"><button id="back" class="alt" aria-label="Mundur 10 detik">⏪ 10 dtk</button><button id="toggle" aria-label="Putar atau jeda">▶ Putar</button><button id="fwd" class="alt" aria-label="Maju 10 detik">10 dtk ⏩</button></div>
+    <p id="modeNote" class="note" hidden></p>
     <div class="card">
       <div class="set">
         <div><label for="every">Jeda sorotan (menit)</label><div class="stepper"><button id="evDec" type="button" class="alt" aria-label="Kurangi jeda">−</button><input id="every" type="number" min="0.5" max="60" step="0.5" value="3" inputmode="decimal"><button id="evInc" type="button" class="alt" aria-label="Tambah jeda">+</button></div></div>
@@ -256,9 +268,12 @@ details[open] summary::after{transform:rotate(45deg)}
 <div id="sheet" class="sheet" hidden role="dialog" aria-modal="true" aria-label="Kata untuk dipelajari">
   <div class="panel">
     <div id="cardBody"></div>
+    <p id="sheetHint" class="note" hidden>⏸ Jeda juga video di situsnya sendiri. Setelah selesai, tekan PLAY AGAIN lalu putar lagi videonya.</p>
     <div class="btns"><button id="again">▶ PLAY AGAIN</button><button id="next" class="alt">NEXT ➜</button></div>
   </div>
 </div>
+
+<div id="fsbar" hidden><button id="fsExit" type="button" aria-label="Keluar layar penuh">✕</button><button id="fsClock" type="button" aria-label="Mulai atau jeda jam sinkron">⏱</button><button id="fsNow" type="button" aria-label="Sorot kata sekarang">✨</button></div>
 
 <script>
 'use strict';
@@ -329,10 +344,6 @@ async function mountYouTube(id) {
     });
   });
 }
-function mountVideo(src) {
-  const v = document.createElement('video'); v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'metadata'; v.src = src;
-  $('player').replaceChildren(v); return vidAdapter(v);
-}
 
 /* ---------- Subtitle manual (.srt / .vtt) ---------- */
 function parseTime(s) { const m = s.trim().match(/(?:(\d+):)?(\d+):(\d+)[.,](\d+)/); return m ? Number(m[1] || 0) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number('0.' + m[4]) : NaN; }
@@ -362,20 +373,167 @@ async function getSubs(raw) {
 }
 $('getSubs').onclick = () => getSubs($('link').value.trim());
 
+/* ---------- Pemutar serbaguna: YouTube → file/HLS → situs asli → embed resmi → tab baru ---------- */
+const VIDEO_ERR = { 1: 'Pemutaran dibatalkan.', 2: 'Gangguan jaringan saat memuat video.', 3: 'File video rusak atau formatnya tidak bisa didekode.', 4: 'Browser tidak mendukung format ini, atau server video menolak akses dari website lain (hotlink/butuh login). Coba "Buka di tab baru".' };
+const FRAME_NOTE = 'ℹ️ Video diputar oleh pemutar ASLI situsnya (kontrol, subtitle bawaan, dll tetap milik situs). Karena aturan keamanan browser, aplikasi tidak bisa membaca waktu atau menjeda video itu. Pakai "jam sinkron": muat subtitle (tempel/unggah), tekan ▶ Mulai jam bersamaan dengan Play di video, lalu setel selisih dengan ⏪/⏩.';
+let hlsInst = null, hlsLoading = null, curUrl = '';
+
+function providerEmbed(u) { // penyedia video yang menyediakan embed RESMI
+  const h = u.hostname.toLowerCase().replace(/^(www|m|mobile)\./, ''), p = u.pathname, q = u.searchParams; let m;
+  const par = encodeURIComponent(location.hostname || 'localhost');
+  if (h === 'player.vimeo.com' && (m = p.match(/^\/video\/(\d+)/))) return { name: 'Vimeo', embed: 'https://player.vimeo.com/video/' + m[1] + (q.get('h') ? '?h=' + encodeURIComponent(q.get('h')) : '') };
+  if (h === 'vimeo.com' && (m = p.match(/\/(\d{6,})(?:\/([0-9a-f]{8,}))?\/?$/))) return { name: 'Vimeo', embed: 'https://player.vimeo.com/video/' + m[1] + (m[2] ? '?h=' + m[2] : '') };
+  if (h === 'dailymotion.com' && (m = p.match(/^\/(?:[a-z]{2}\/)?(?:video|embed\/video)\/([a-z0-9]+)/i))) return { name: 'Dailymotion', embed: 'https://www.dailymotion.com/embed/video/' + m[1] };
+  if (h === 'dai.ly' && (m = p.match(/^\/([a-z0-9]+)$/i))) return { name: 'Dailymotion', embed: 'https://www.dailymotion.com/embed/video/' + m[1] };
+  if (h === 'streamable.com' && (m = p.match(/^\/(?:e\/|o\/)?([a-z0-9]{4,8})$/i))) return { name: 'Streamable', embed: 'https://streamable.com/e/' + m[1] };
+  if (h === 'twitch.tv' && (m = p.match(/^\/videos\/(\d+)/))) return { name: 'Twitch', embed: 'https://player.twitch.tv/?video=v' + m[1] + '&parent=' + par + '&autoplay=false' };
+  if (h === 'twitch.tv' && (m = p.match(/^\/[^/]+\/clip\/([\w-]+)/))) return { name: 'Twitch', embed: 'https://clips.twitch.tv/embed?clip=' + m[1] + '&parent=' + par + '&autoplay=false' };
+  if (h === 'clips.twitch.tv' && (m = p.match(/^\/([\w-]+)/))) return { name: 'Twitch', embed: 'https://clips.twitch.tv/embed?clip=' + m[1] + '&parent=' + par + '&autoplay=false' };
+  if (h === 'tiktok.com' && (m = p.match(/\/video\/(\d+)/))) return { name: 'TikTok', embed: 'https://www.tiktok.com/embed/v2/' + m[1] };
+  if (h === 'instagram.com' && (m = p.match(/^\/(?:[\w.]+\/)?(p|reel|reels|tv)\/([\w-]+)/))) return { name: 'Instagram', embed: 'https://www.instagram.com/' + (m[1] === 'reels' ? 'reel' : m[1]) + '/' + m[2] + '/embed' };
+  if ((h === 'x.com' || h === 'twitter.com') && (m = p.match(/\/status\/(\d+)/))) return { name: 'X (Twitter)', embed: 'https://platform.twitter.com/embed/Tweet.html?id=' + m[1] };
+  if ((h === 'facebook.com' || h === 'fb.watch') && (/\/(videos|reel)\/|\/watch\/?$/.test(p) || h === 'fb.watch')) return { name: 'Facebook', embed: 'https://www.facebook.com/plugins/video.php?show_text=false&href=' + encodeURIComponent(u.href) };
+  if (h === 'bilibili.com' && (m = p.match(/\/video\/(BV[\w]+)/i))) return { name: 'Bilibili', embed: 'https://player.bilibili.com/player.html?autoplay=0&bvid=' + m[1] };
+  if (h === 'nicovideo.jp' && (m = p.match(/\/watch\/((?:sm|nm|so)\d+)/))) return { name: 'Niconico', embed: 'https://embed.nicovideo.jp/watch/' + m[1] };
+  if (h === 'drive.google.com' && (m = p.match(/\/file\/d\/([\w-]+)/))) return { name: 'Google Drive', embed: 'https://drive.google.com/file/d/' + m[1] + '/preview' };
+  if (h === 'loom.com' && (m = p.match(/\/share\/([a-f0-9]+)/))) return { name: 'Loom', embed: 'https://www.loom.com/embed/' + m[1] };
+  if (h === 'ted.com' && (m = p.match(/^\/talks\/([\w-]+)/))) return { name: 'TED', embed: 'https://embed.ted.com/talks/' + m[1] };
+  return null;
+}
+function classify(raw) {
+  let u; try { u = new URL(raw); } catch (e) { return { kind: 'bad' }; }
+  if (!/^https?:$/.test(u.protocol)) return { kind: 'bad' };
+  const id = ytId(raw); if (id) return { kind: 'youtube', id };                                   // 1. YouTube resmi
+  const ext = (u.pathname.match(/\.([a-z0-9]{2,5})$/i) || [])[1] || '';
+  if (/^(mp4|webm|ogv|mov|m4v)$/i.test(ext)) return { kind: 'file', src: raw };                      // 2. video langsung
+  if (/^m3u8$/i.test(ext)) return { kind: 'hls', src: raw };                                         // 2. HLS
+  const pv = providerEmbed(u); if (pv) return { kind: 'provider', ...pv };                          // 4. provider pihak ketiga
+  return { kind: 'site' };                                                                           // 3. website asli
+}
+
+// Jam cadangan: dipakai saat pemutar tidak bisa dibaca (iframe lintas situs). Antarmukanya sama dengan pemutar lain.
+function manualAdapter() {
+  let base = 0, t0 = null;
+  const now = () => base + (t0 == null ? 0 : (performance.now() - t0) / 1000);
+  const set = (t) => { base = Math.max(0, t); if (t0 != null) t0 = performance.now(); };
+  return {
+    manual: true,
+    play: () => { if (t0 == null) t0 = performance.now(); },
+    pause: () => { base = now(); t0 = null; },
+    seekBy: (d) => set(now() + d), seek: (t) => set(t), time: now,
+    dur: () => (subs && subs.cues.length ? subs.cues[subs.cues.length - 1].end + 1 : 0),
+    playing: () => t0 != null,
+  };
+}
+
+function loadHls() {
+  if (window.Hls) return Promise.resolve();
+  if (hlsLoading) return hlsLoading;
+  hlsLoading = new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js'; s.onload = res; s.onerror = () => { hlsLoading = null; rej(new Error('hls')); }; document.head.appendChild(s); });
+  return hlsLoading;
+}
+async function mountVideo(src, isHls) {
+  if (hlsInst) { try { hlsInst.destroy(); } catch (e) {} hlsInst = null; }
+  const v = document.createElement('video'); v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'metadata';
+  v.addEventListener('error', () => status(VIDEO_ERR[v.error && v.error.code] || 'Video tidak bisa diputar.', true));
+  $('player').replaceChildren(v);
+  if (isHls && !v.canPlayType('application/vnd.apple.mpegurl')) { // Safari/iPhone memutar HLS sendiri; browser lain butuh hls.js
+    await loadHls();
+    if (!window.Hls || !window.Hls.isSupported()) throw new Error('hls-unsupported');
+    hlsInst = new window.Hls();
+    hlsInst.on(window.Hls.Events.ERROR, (e, d) => { if (d && d.fatal) status(d.type === 'networkError' ? 'Stream HLS gagal dimuat: server stream menolak akses dari website lain (CORS), butuh login, atau tautan sudah kedaluwarsa. Coba "Buka di tab baru".' : 'Stream HLS gagal diputar (format/kode tidak didukung).', true); });
+    hlsInst.loadSource(src); hlsInst.attachMedia(v);
+  } else v.src = src;
+  return vidAdapter(v);
+}
+function mountFrame(url, opts) {
+  opts = opts || {};
+  const f = document.createElement('iframe');
+  f.src = url; f.title = opts.label || 'Pemutar video'; f.allowFullscreen = true; f.referrerPolicy = 'strict-origin-when-cross-origin';
+  f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture; clipboard-write';
+  // Situs umum dikurung (tanpa izin mengalihkan halaman aplikasi ini). Embed resmi penyedia dimuat apa adanya.
+  if (opts.strict) f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation');
+  $('player').replaceChildren(f);
+}
+function setFull(on) { document.body.classList.toggle('fs', on); $('player').classList.toggle('full', on); $('fsbar').hidden = !on; document.documentElement.style.overflow = on ? 'hidden' : ''; }
+function setMode(mode, url, note) {
+  curUrl = url || '';
+  $('siteBar').hidden = !(mode === 'frame' || mode === 'video' || mode === 'blocked');
+  $('fsBtn').hidden = $('reBtn').hidden = mode !== 'frame';
+  $('player').classList.toggle('tall', mode === 'frame' || mode === 'blocked');
+  const n = $('modeNote'); n.hidden = !note; n.textContent = note || '';
+}
+const openTab = () => { if (curUrl) window.open(curUrl, '_blank', 'noopener,noreferrer'); };
+$('tabBtn').onclick = openTab;
+$('fsBtn').onclick = () => setFull(true);
+$('reBtn').onclick = () => { const f = $('player').querySelector('iframe'); if (f) f.src = f.src; };
+$('fsExit').onclick = () => setFull(false);
+$('fsClock').onclick = () => $('toggle').onclick();
+$('fsNow').onclick = () => highlight();
+addEventListener('keydown', (e) => { if (e.key === 'Escape') setFull(false); });
+
+function showBlocked(raw, why, extraTip) {
+  const b = el('div', 'blocked'); b.append(el('h3', '', '🚫 Situs ini tidak mengizinkan ditampilkan di dalam aplikasi'));
+  const ul = el('ul'); why.forEach((w) => ul.append(el('li', '', w))); b.append(ul);
+  b.append(el('p', 'tips', 'Cara yang sah untuk tetap belajar:'));
+  const tips = el('ul'); [
+    '↗ Buka di tab baru dan tonton di sana dengan pemutar aslinya. Di aplikasi ini, muat subtitle lalu pakai "jam sinkron" (paling nyaman jika layar dibagi dua di tablet/komputer; di HP, tab latar belakang sering dibekukan).',
+    'Cari video yang sama di platform yang mengizinkan sematan resmi (YouTube, Vimeo, Dailymotion), atau pakai link file .mp4/.m3u8 langsung.',
+    'Jika situsnya mengizinkan lewat pengaturan sendiri, pemilik situs bisa menambahkan alamat aplikasi ini ke daftar yang diizinkan.',
+  ].concat(extraTip ? [extraTip] : []).forEach((t) => tips.append(el('li', '', t))); b.append(tips);
+  const row = el('div', 'row'), open = el('button', '', '↗ Buka di tab baru'), force = el('button', 'alt', 'Tetap coba tampilkan');
+  open.onclick = openTab; force.onclick = () => { mountFrame(raw, { strict: true }); setMode('frame', raw, FRAME_NOTE); };
+  row.append(open, force); b.append(row); $('player').replaceChildren(b);
+}
+
+async function mountSite(raw) {
+  $('stage').hidden = false; P = manualAdapter();
+  status('🔍 Menyelidiki website: apakah boleh ditampilkan di dalam aplikasi?');
+  let info = null;
+  try { info = await (await fetch('/api/inspect?url=' + encodeURIComponent(raw) + '&origin=' + encodeURIComponent(location.origin), { signal: timeoutSignal(15000) })).json(); } catch (e) {}
+  if (!info || !info.ok) { // penyelidikan gagal: jangan menyerah, coba tampilkan langsung
+    mountFrame(raw, { strict: true }); setMode('frame', raw, FRAME_NOTE);
+    status('⚠️ ' + ((info && info.message) || 'Penyelidik tidak menjawab') + ' Tetap kucoba menampilkan situsnya di sini. Jika layar kosong, pakai "Buka di tab baru".', true); return;
+  }
+  const target = info.finalUrl || raw;
+  if (info.youtubeId) { P = await mountYouTube(info.youtubeId); setMode('none'); status('✅ Halaman ini memakai pemutar YouTube resmi; fitur penuh aktif.'); await getSubs('https://youtu.be/' + info.youtubeId); return; }
+  if (info.kind === 'video' || info.kind === 'hls' || info.direct) {
+    const src = info.direct ? info.direct.url : target; P = await mountVideo(src, info.kind === 'hls' || /mpegurl/i.test(info.contentType || ''));
+    setMode('video', src); status('✅ Alamat ini ternyata file video langsung. Tempel subtitle agar sorotan kata jalan.'); $('pasteBox').open = true; return;
+  }
+  if (info.embed || info.providers.length) {
+    const e = info.embed ? info.embed.url : info.providers[0].embed, why = info.embed ? 'embed resmi yang dideklarasikan penerbit (' + info.embed.source + ')' : 'pemutar ' + info.providers[0].name;
+    mountFrame(e, { label: info.title }); setMode('frame', e, FRAME_NOTE); status('✅ Memakai ' + why + '.'); $('pasteBox').open = true; return;
+  }
+  const mixed = /^http:\/\//i.test(target) && location.protocol === 'https:';
+  const why = info.framing.reasons.slice(); if (mixed) why.push('Alamat situs memakai http:// sedangkan aplikasi ini https://, sehingga browser memblokirnya (mixed content).');
+  info.notes.forEach((n) => why.push(n));
+  if (!info.framing.allowed || mixed) { setMode('blocked', target, null); showBlocked(target, why); status('🚫 Tidak bisa disematkan. Lihat penjelasan dan solusi di atas pemutar.', true); $('pasteBox').open = true; return; }
+  mountFrame(target, { strict: true, label: info.title }); setMode('frame', target, FRAME_NOTE);
+  status('✅ Situs tidak melarang iframe (' + (info.title || 'tanpa judul') + '). Jika layar kosong, kemungkinan pemutarnya butuh login/cookie pihak ketiga atau memblokir sematan lewat skrip; pakai "Buka di tab baru".');
+  $('pasteBox').open = true;
+}
+
 /* ---------- Memuat video ---------- */
 $('load').onclick = async () => {
-  const raw = $('link').value.trim(); subs = null; shown = []; acc = 0; if (P) { try { P.pause(); } catch (e) {} }
+  const raw = $('link').value.trim(); subs = null; shown = []; acc = 0; lastT = null;
+  if (P) { try { P.pause(); } catch (e) {} }
   if (!/^https?:\/\//i.test(raw)) return status('Tempel link yang dimulai dengan https://', true);
-  const id = ytId(raw);
+  setFull(false); setMode('none');
+  const c = classify(raw);
   try {
-    if (id) {
+    if (c.kind === 'youtube') {
       status('Memuat pemutar video…'); $('stage').hidden = false;
-      P = await mountYouTube(id);
+      P = await mountYouTube(c.id);
       await getSubs(raw);
-    } else if (/\.(mp4|webm|mov)(\?|#|$)/i.test(raw)) {
-      P = mountVideo(raw); $('stage').hidden = false; status('Video dimuat. Tempel subtitle manual di bawah agar sorotan kata bisa jalan.'); $('pasteBox').open = true;
-    } else status('Link belum didukung. Pakai link YouTube atau link file video (.mp4).', true);
-  } catch (e) { status(e && e.message === 'timeout' ? 'Pemutar YouTube tidak merespons. Coba video lain, matikan pemblokir iklan untuk situs ini, atau muat ulang dengan Ctrl+F5.' : 'Gagal memuat. Periksa internet lalu coba lagi.', true); }
+    } else if (c.kind === 'file' || c.kind === 'hls') {
+      $('stage').hidden = false; P = await mountVideo(c.src, c.kind === 'hls'); setMode('video', raw);
+      status('Video dimuat. Tempel subtitle manual di bawah agar sorotan kata bisa jalan.'); $('pasteBox').open = true;
+    } else if (c.kind === 'provider') {
+      $('stage').hidden = false; P = manualAdapter(); mountFrame(c.embed, { label: c.name }); setMode('frame', c.embed, FRAME_NOTE);
+      status('✅ Memakai pemutar resmi ' + c.name + '. Muat subtitle untuk mengaktifkan sorotan kata.'); $('pasteBox').open = true;
+    } else await mountSite(raw);
+  } catch (e) { status(e && e.message === 'timeout' ? 'Pemutar YouTube tidak merespons. Coba video lain, matikan pemblokir iklan untuk situs ini, atau muat ulang dengan Ctrl+F5.' : (e && e.message === 'hls-unsupported' ? 'Browser ini tidak bisa memutar HLS. Coba "Buka di tab baru".' : 'Gagal memuat. Periksa internet lalu coba lagi.'), true); }
 };
 function openSite(kind) {
   const raw = $('link').value.trim();
@@ -425,7 +583,7 @@ let lastT = null;
 setInterval(() => {
   if (!P) return;
   let playing = false, t = 0; try { playing = P.playing(); t = P.time() || 0; } catch (e) {}
-  $('toggle').textContent = playing ? '⏸ Jeda' : '▶ Putar';
+  const mt = P.manual; $('toggle').textContent = playing ? (mt ? '⏸ Jeda jam' : '⏸ Jeda') : (mt ? '▶ Mulai jam' : '▶ Putar'); $('fsClock').textContent = playing ? '⏸' : '⏱';
   if (subs) { const c = subs.cues.filter((x) => x.start <= t && x.end >= t)[0]; $('sub').textContent = c ? c.text : ''; }
   const dt = lastT == null ? 0 : t - lastT; lastT = t;
   if (!$('sheet').hidden || !subs || busy) return;
@@ -486,7 +644,7 @@ function renderMsg(text) { $('cardBody').replaceChildren(el('p', 'note', text));
 async function highlight() {
   if (!P || busy) return;
   if (!subs || !subs.cues.length) return status('Belum ada subtitle. Muat video yang punya subtitle atau tempel manual.', true);
-  busy = true; acc = 0; try { P.pause(); } catch (e) {}
+  busy = true; acc = 0; try { P.pause(); } catch (e) {} $('sheetHint').hidden = !P.manual;
   openSheet(true); renderMsg('⏳ Mencari kata untukmu…');
   try {
     const r = await fetch('/api/highlight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: pickLines(), sourceLang: subs.lang, wordCount: Number($('wc').value), exclude: shown.slice(-40) }) });
