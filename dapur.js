@@ -388,189 +388,9 @@ function defaultTokenizer() {
   return kuromojiPromise.then((tk) => (text) => tk.tokenize(text));
 }
 
-// ---------- Penyelidik situs: kenapa sebuah halaman bisa / tidak bisa ditampilkan di iframe ----------
-// Hanya MEMBACA halaman publik (seperti pratinjau link). Tidak mengambil/mengalirkan video, tidak melewati
-// login, DRM, atau pembatasan apa pun. Server dilindungi dari SSRF: alamat internal dan port aneh ditolak.
-const dns = require('dns');
-const net = require('net');
-const https = require('https');
-const INS_LIMIT = 15;
+const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.youtube.com https://s.ytimg.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com; img-src 'self' data: https://i.ytimg.com; media-src *; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
-function isPrivateIp(ip) {
-  if (net.isIPv4(ip)) {
-    const [a, b] = ip.split('.').map(Number);
-    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
-  }
-  if (net.isIPv6(ip)) {
-    const x = ip.toLowerCase();
-    if (x.startsWith('::ffff:')) { const m = x.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/); return m ? isPrivateIp(m[1]) : true; }
-    return x === '::' || x === '::1' || /^f[cd]/.test(x) || /^fe[89ab]/.test(x) || x.startsWith('ff');
-  }
-  return true;
-}
-
-function guardedLookup(hostname, options, cb, allowPrivate) { // cek alamat TEPAT saat tersambung (anti DNS-rebinding)
-  dns.lookup(hostname, { ...(options || {}), all: true }, (err, addrs) => {
-    if (err) return cb(err);
-    if (!addrs.length || (!allowPrivate && addrs.some((a) => isPrivateIp(a.address)))) return cb(new Error('PRIVATE'));
-    if (options && options.all) return cb(null, addrs);
-    cb(null, addrs[0].address, addrs[0].family);
-  });
-}
-
-function safeGet(rawUrl, { maxBytes = 400000, timeoutMs = 4000, maxRedirects = 3, allowPrivate = false } = {}) {
-  return new Promise((resolve, reject) => {
-    const visit = (urlStr, left) => {
-      let u; try { u = new URL(urlStr); } catch { return reject(new Error('BAD_URL')); }
-      if ((u.protocol !== 'http:' && u.protocol !== 'https:') || u.username || u.password) return reject(new Error('BAD_URL'));
-      if (u.port && !['80', '443'].includes(u.port) && !allowPrivate) return reject(new Error('BAD_PORT'));
-      const host = u.hostname.replace(/^\[|\]$/g, '');
-      if (net.isIP(host) && isPrivateIp(host) && !allowPrivate) return reject(new Error('PRIVATE'));
-      let done = false;
-      const finish = (fn, v) => { if (!done) { done = true; clearTimeout(wall); fn(v); } };
-      const req = (u.protocol === 'https:' ? https : http).request(u, {
-        method: 'GET', timeout: timeoutMs, lookup: (h, o, cb) => guardedLookup(h, o, cb, allowPrivate),
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NihongoVideoInspector/1.0)', Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.5', 'Accept-Encoding': 'identity', 'Accept-Language': 'en' },
-      }, (res) => {
-        const h = {}; for (const [k, v] of Object.entries(res.headers)) h[k.toLowerCase()] = Array.isArray(v) ? v.join(', ') : String(v);
-        if ([301, 302, 303, 307, 308].includes(res.statusCode) && h.location) {
-          res.resume(); if (left <= 0) return finish(reject, new Error('TOO_MANY_REDIRECTS'));
-          let next; try { next = new URL(h.location, u).toString(); } catch { return finish(reject, new Error('BAD_URL')); }
-          done = true; clearTimeout(wall); return visit(next, left - 1);
-        }
-        const type = (h['content-type'] || '').toLowerCase();
-        const out = (body) => finish(resolve, { status: res.statusCode, headers: h, body, finalUrl: u.toString() });
-        if (type && !/text\/|json|xml/.test(type)) { res.destroy(); return out(''); } // video/audio/gambar: cukup header
-        let size = 0; const chunks = [];
-        res.on('data', (c) => { size += c.length; chunks.push(c); if (size > maxBytes) res.destroy(); });
-        res.on('end', () => out(Buffer.concat(chunks).toString('utf8').slice(0, maxBytes)));
-        res.on('close', () => out(Buffer.concat(chunks).toString('utf8').slice(0, maxBytes)));
-        res.on('error', () => out(Buffer.concat(chunks).toString('utf8').slice(0, maxBytes)));
-      });
-      const wall = setTimeout(() => req.destroy(new Error('TIMEOUT')), timeoutMs * 2);
-      req.on('timeout', () => req.destroy(new Error('TIMEOUT')));
-      req.on('error', (e) => finish(reject, e));
-      req.end();
-    };
-    visit(rawUrl, maxRedirects);
-  });
-}
-
-// --- Menilai apakah halaman boleh dimuat di iframe, persis seperti yang dilakukan browser ---
-function parseFrameAncestors(csp) {
-  const out = [];
-  for (const policy of String(csp || '').split(/,(?=\s*[a-z-]+[\s;])/i)) {
-    for (const d of policy.split(';')) { const [name, ...src] = d.trim().split(/\s+/); if (name && name.toLowerCase() === 'frame-ancestors') out.push(src); }
-  }
-  return out;
-}
-function ancestorAllows(sources, origin) {
-  const o = new URL(origin);
-  return sources.some((raw) => {
-    const s = raw.replace(/^'|'$/g, '').toLowerCase();
-    if (s === '*') return true;
-    if (s === 'none' || s === 'self') return false; // 'self' = situs itu sendiri, bukan aplikasi kita
-    if (/^https?:$/.test(s)) return o.protocol === s;
-    const m = s.match(/^(?:(https?):\/\/)?(\*\.)?([a-z0-9.-]+)(?::(\d+|\*))?$/);
-    if (!m) return false;
-    if (m[1] && o.protocol !== m[1] + ':') return false;
-    if (m[4] && m[4] !== '*' && m[4] !== (o.port || (o.protocol === 'https:' ? '443' : '80'))) return false;
-    return m[2] ? o.hostname.endsWith('.' + m[3]) : o.hostname === m[3];
-  });
-}
-function framingVerdict(h, origin) {
-  const reasons = [];
-  const policies = parseFrameAncestors(h['content-security-policy']);
-  if (policies.length) { // jika ada frame-ancestors, browser mengabaikan X-Frame-Options
-    const bad = policies.filter((p) => !ancestorAllows(p, origin));
-    if (bad.length) reasons.push(`Situs mengirim Content-Security-Policy "frame-ancestors ${bad[0].join(' ')}" yang tidak mengizinkan alamat aplikasi ini (${new URL(origin).host}) menyematkan halamannya.`);
-  } else {
-    const xfo = String(h['x-frame-options'] || '').toLowerCase();
-    if (/\b(deny|sameorigin)\b/.test(xfo)) reasons.push(`Situs mengirim header X-Frame-Options: ${xfo.trim().toUpperCase()}, yang melarang halamannya dimuat di dalam iframe milik situs lain.`);
-  }
-  return { allowed: reasons.length === 0, reasons };
-}
-
-// --- Membaca informasi embed yang DIDEKLARASIKAN penerbit (untuk pratinjau/penyematan resmi) ---
-function attrOf(tag, name) {
-  const m = tag.match(new RegExp('\\b' + name + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\'|([^\\s>]+))', 'i'));
-  return m ? decodeEntities(m[1] ?? m[2] ?? m[3] ?? '') : null;
-}
-function metaMap(html) {
-  const meta = {};
-  for (const m of html.matchAll(/<meta\b[^>]*>/gi)) {
-    const k = (attrOf(m[0], 'property') || attrOf(m[0], 'name') || '').toLowerCase(), v = attrOf(m[0], 'content');
-    if (k && v != null && !(k in meta)) meta[k] = v;
-  }
-  return meta;
-}
-const httpsUrl = (s, base) => { try { const u = new URL(s, base); if (u.protocol === 'http:' && !net.isIP(u.hostname)) u.protocol = 'https:'; return u.protocol === 'https:' && !net.isIP(u.hostname) ? u.toString() : null; } catch { return null; } };
-
-// Penyedia pemutar arus utama yang resmi menyediakan embed. Host lain TIDAK diekstrak dari isi halaman.
-function knownEmbed(src) {
-  let u; try { u = new URL(src); } catch { return null; }
-  const h = u.hostname.toLowerCase().replace(/^www\./, ''), p = u.pathname; let m;
-  if ((h === 'youtube.com' || h === 'youtube-nocookie.com') && (m = p.match(/^\/embed\/([A-Za-z0-9_-]{11})/))) return { name: 'YouTube', youtubeId: m[1] };
-  if (h === 'player.vimeo.com' && /^\/video\/\d+/.test(p)) return { name: 'Vimeo', embed: 'https://player.vimeo.com' + p + u.search };
-  if (h === 'dailymotion.com' && /^\/embed\/video\//.test(p)) return { name: 'Dailymotion', embed: 'https://www.dailymotion.com' + p + u.search };
-  if (h === 'streamable.com' && /^\/e\//.test(p)) return { name: 'Streamable', embed: 'https://streamable.com' + p };
-  if (h === 'embed.ted.com') return { name: 'TED', embed: 'https://embed.ted.com' + p };
-  if (h === 'player.bilibili.com') return { name: 'Bilibili', embed: 'https://player.bilibili.com' + p + u.search };
-  return null;
-}
-
-function extractInfo(html, baseUrl) {
-  const meta = metaMap(html);
-  const out = { title: cleanText(decodeEntities(meta['og:title'] || (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '')), embed: null, direct: null, providers: [], youtubeId: null, oembedUrl: null };
-  const tp = meta['twitter:player'] && httpsUrl(meta['twitter:player'], baseUrl);
-  if (tp) out.embed = { url: tp, source: 'twitter:player' };
-  const ov = meta['og:video:secure_url'] || meta['og:video:url'] || meta['og:video'], ot = (meta['og:video:type'] || '').toLowerCase();
-  if (ov) {
-    const v = httpsUrl(ov, baseUrl);
-    if (v && /^video\//.test(ot)) out.direct = { url: v, type: ot, source: 'og:video' };
-    else if (v && /html|flash/.test(ot) && !out.embed) out.embed = { url: v, source: 'og:video' };
-  }
-  const lk = html.match(/<link\b[^>]*type\s*=\s*["']application\/json\+oembed["'][^>]*>/i);
-  if (lk) { const href = attrOf(lk[0], 'href'); out.oembedUrl = href && httpsUrl(href, baseUrl); }
-  for (const m of html.matchAll(/<iframe\b[^>]*>/gi)) {
-    const src = attrOf(m[0], 'src') || attrOf(m[0], 'data-src'); const k = src && knownEmbed(httpsUrl(src, baseUrl) || '');
-    if (!k) continue;
-    if (k.youtubeId && !out.youtubeId) out.youtubeId = k.youtubeId;
-    else if (k.embed && !out.providers.some((p) => p.embed === k.embed)) out.providers.push({ name: k.name, embed: k.embed });
-    if (out.providers.length + (out.youtubeId ? 1 : 0) >= 3) break;
-  }
-  return out;
-}
-
-async function inspectUrl(get, rawUrl, origin) {
-  const r = await get(rawUrl);
-  const type = String(r.headers['content-type'] || '').toLowerCase().split(';')[0].trim();
-  const base = { ok: true, finalUrl: r.finalUrl, status: r.status, contentType: type, embed: null, direct: null, youtubeId: null, providers: [], title: '', notes: [] };
-  if (/^video\//.test(type)) return { ...base, kind: 'video', framing: { allowed: true, reasons: [] } };
-  if (/mpegurl/.test(type)) return { ...base, kind: 'hls', framing: { allowed: true, reasons: [] } };
-  const framing = framingVerdict(r.headers, origin);
-  const body = r.body || '';
-  const cloudflare = r.headers['cf-mitigated'] === 'challenge' || ([403, 503].includes(r.status) && /just a moment|cf-chl|challenge-platform/i.test(body));
-  if (cloudflare) base.notes.push('Situs memakai tantangan anti-bot (Cloudflare). Server kami tidak boleh dan tidak mencoba melewatinya, jadi isi halaman tidak terbaca. Browser kamu sendiri mungkin tetap bisa membukanya.');
-  else if (r.status === 401 || r.status === 403) base.notes.push(`Server situs menjawab ${r.status}: halaman butuh login atau menolak permintaan dari server. Browser kamu mungkin tetap bisa membukanya setelah login.`);
-  else if (r.status >= 400) base.notes.push(`Server situs menjawab ${r.status} (halaman tidak ditemukan atau bermasalah).`);
-  let info = { embed: null, direct: null, providers: [], youtubeId: null, title: '', oembedUrl: null };
-  if (/html|xml/.test(type) && body) info = extractInfo(body, r.finalUrl);
-  if (!info.embed && info.oembedUrl) { // oEmbed: cara resmi penerbit menyatakan "inilah kode embed saya"
-    try {
-      const o = await get(info.oembedUrl, { maxBytes: 100000 });
-      const j = JSON.parse(o.body || '{}'), src = j.html && attrOf((String(j.html).match(/<iframe\b[^>]*>/i) || [''])[0], 'src');
-      const u = src && httpsUrl(src, info.oembedUrl); if (u) info.embed = { url: u, source: 'oEmbed' };
-    } catch { /* oEmbed tidak tersedia: lanjut */ }
-  }
-  return { ...base, kind: 'page', title: info.title, embed: info.embed, direct: info.direct, youtubeId: info.youtubeId, providers: info.providers, framing };
-}
-
-const inspectMessage = (e) => ({ BAD_URL: 'Link tidak valid.', BAD_PORT: 'Port alamat ini tidak umum, jadi tidak diselidiki.', PRIVATE: 'Alamat internal/privat tidak boleh diselidiki oleh server.', TIMEOUT: 'Situs tidak menjawab tepat waktu.', TOO_MANY_REDIRECTS: 'Terlalu banyak pengalihan (redirect).' }[e && e.message] || 'Server tidak bisa menjangkau situs itu (bisa jadi situs memblokir server atau sedang mati).');
-
-const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.youtube.com https://s.ytimg.com https://cdn.jsdelivr.net; frame-src https:; img-src 'self' data: https:; media-src * blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https:; base-uri 'none'; form-action 'none'";
-
-function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, indexPath = path.join(__dirname, 'index.html'), supadataKey = process.env.SUPADATA_API_KEY, inspectGet = safeGet } = {}) {
+function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, indexPath = path.join(__dirname, 'index.html'), supadataKey = process.env.SUPADATA_API_KEY } = {}) {
   const hits = new Map();
   const cache = new Map();
   const subCache = new Map(); // subtitle disimpan SEMENTARA di memori server (20 menit) agar hemat kuota; tidak ada penyimpanan permanen
@@ -608,7 +428,7 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
 
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
         let html; try { html = fs.readFileSync(indexPath); } catch { return send(404, { ok: false, message: 'Halaman belum ada.' }); }
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP, 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Cache-Control': 'no-cache' });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP, 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-cache' });
         return res.end(html);
       }
       if (req.method === 'GET' && url.pathname === '/api/health') return send(200, { ok: true });
@@ -621,14 +441,6 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
         let out;
         try { out = await loadSubs(v.id); } catch { return fail(502, 'UPSTREAM'); }
         return out.error ? send(out.error === 'UPSTREAM' ? 502 : 200, { ok: false, code: out.error, message: MSG[out.error], trace: (out.trace || []).join(' ').slice(0, 400) }) : send(200, out);
-      }
-
-      if (req.method === 'GET' && url.pathname === '/api/inspect') {
-        if (tooMany('ins', INS_LIMIT)) return fail(429, 'RATE_LIMIT');
-        const raw = (url.searchParams.get('url') || '').trim();
-        if (!raw || raw.length > 500 || !/^https?:\/\//i.test(raw)) return fail(400, 'BAD_LINK');
-        let origin; try { origin = new URL(url.searchParams.get('origin') || '').origin; } catch { origin = 'https://' + String(req.headers['x-forwarded-host'] || req.headers.host || 'localhost').split(',')[0].trim(); }
-        try { return send(200, await inspectUrl(inspectGet, raw, origin)); } catch (e) { return send(200, { ok: false, code: 'INSPECT_FAIL', message: inspectMessage(e) }); }
       }
 
       if (req.method === 'POST' && url.pathname === '/api/highlight') {
@@ -662,7 +474,7 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
   });
 }
 
-module.exports = { isPrivateIp, safeGet, framingVerdict, ancestorAllows, extractInfo, inspectUrl, knownEmbed, createServer, fetchViaSupadata, parseXml, parseVtt, parseCaption, extractPlayerResponse, orderTracks, fetchSubtitles, extractVideoId, parseJson3, pickTrack, captionUrl, cleanText, buildCard, cleanInput, toRomaji, toHiragana, candidates, partsOf };
+module.exports = { createServer, fetchViaSupadata, parseXml, parseVtt, parseCaption, extractPlayerResponse, orderTracks, fetchSubtitles, extractVideoId, parseJson3, pickTrack, captionUrl, cleanText, buildCard, cleanInput, toRomaji, toHiragana, candidates, partsOf };
 
 if (require.main === module) {
   createServer().listen(PORT, () => {
