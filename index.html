@@ -72,6 +72,7 @@ main{
 .hero h1{margin:0;font-size:clamp(2.2rem,9vw,3.6rem);line-height:1.02;font-weight:300;letter-spacing:.01em;text-transform:uppercase;
   text-shadow:0 4px 30px rgba(90,40,200,.25)}
 .hero h1 b{display:block;font-weight:800}
+.hero h1 .jp{font-weight:800}
 .hero p{margin:14px 0 0;max-width:46ch;color:var(--mute);font-size:.95rem}
 
 /* ---------- Kartu kaca ---------- */
@@ -114,6 +115,7 @@ button.alt:hover{background:rgba(255,255,255,.32);box-shadow:0 10px 24px rgba(88
 
 .status{margin:12px 0 0;font-size:.9rem;color:var(--mute)}
 .status.err{color:#fff;background:rgba(255,80,130,.38);border:1px solid rgba(255,255,255,.4);padding:9px 14px;border-radius:14px}
+.status.small{font-size:.63rem}
 details{margin-top:12px}
 summary{cursor:pointer;color:#fff;font-weight:600;font-size:.9rem;min-height:40px;display:flex;align-items:center;gap:6px;list-style:none}
 summary::-webkit-details-marker{display:none}
@@ -154,7 +156,6 @@ details[open] summary::after{transform:rotate(45deg)}
 .note{font-size:.85rem;color:var(--acc2);margin:12px 0}
 .btns{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}
 .btns button:first-child{background:#fff;color:#5b3fd6;box-shadow:0 10px 24px rgba(40,20,120,.3)}
-.speak{background:rgba(255,255,255,.22);border:1px solid rgba(255,255,255,.5);box-shadow:none;min-height:46px;margin-top:8px}
 
 /* ---------- Bar durasi ---------- */
 .seek{display:flex;align-items:center;gap:12px;margin:14px 2px 0;font-size:.85rem;font-weight:600;font-variant-numeric:tabular-nums}
@@ -216,8 +217,8 @@ details[open] summary::after{transform:rotate(45deg)}
   </header>
 
   <section class="hero">
-    <h1><b>Belajar</b>Jepang dari Video</h1>
-    <p>Tempel link YouTube atau file .mp4, lalu temukan kata baru di sela-sela video favoritmu.</p>
+    <h1><b>Belajar</b><span class="jp">Jepang</span> dari Video</h1>
+    <p>Tempel link Video atau file .mp4, lalu temukan kata baru di sela-sela video favoritmu.</p>
   </section>
 
   <section class="card">
@@ -225,7 +226,7 @@ details[open] summary::after{transform:rotate(45deg)}
     <div class="row"><input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/..."><button id="load">Muat</button></div>
     <p id="status" class="status" role="status"></p>
     <details id="pasteBox"><summary>Subtitle tidak terbaca? Tempel manual</summary>
-      <p class="status" style="margin:6px 0 8px">Cara cadangan tanpa batas kuota: 1) buka situs unduh subtitle, 2) unduh file .srt/.vtt, 3) pilih file itu di bawah.</p>
+      <p class="status" style="margin:6px 0 8px">Buka situs unduh subtitle &gt; unduh file .srt/.vtt &gt; input file pada kotak di bawah.</p>
       <div class="row" style="margin-bottom:6px"><button id="openDown" type="button" class="alt" style="flex:1">🌐 Buka DownSub</button><button id="openSave" type="button" class="alt" style="flex:1">🌐 Buka SaveSubs</button></div>
       <p class="note" style="margin:0 0 10px">Link videomu otomatis disalin. Jika kolom di situs kosong, tempel saja (Ctrl+V). Hati-hati dengan iklan di situs itu: jangan pasang aplikasi atau ekstensi apa pun.</p>
       <label for="paste">Isi file subtitle (.srt atau .vtt)</label>
@@ -244,11 +245,8 @@ details[open] summary::after{transform:rotate(45deg)}
         <div><label for="every">Jeda sorotan (menit)</label><div class="stepper"><button id="evDec" type="button" class="alt" aria-label="Kurangi jeda">−</button><input id="every" type="number" min="0.5" max="60" step="0.5" value="3" inputmode="decimal"><button id="evInc" type="button" class="alt" aria-label="Tambah jeda">+</button></div></div>
         <div><label for="wc">Kata per sorotan</label><select id="wc"><option value="1">1 kata</option><option value="2">2 kata</option><option value="3">3 kata</option></select></div>
       </div>
-      <button id="getSubs" class="alt" style="width:100%;margin-top:14px">📥 Ambil subtitle otomatis dari video</button>
-      <p id="status2" class="status" role="status" style="margin-top:10px"></p>
-      <button id="now" style="width:100%;margin-top:12px">✨ Sorot kata sekarang</button>
+      <button id="now" style="width:100%;margin-top:14px">✨ Sorot kata sekarang</button>
       <p id="sub" class="sub"></p>
-      <p class="status">Subtitle hanya disimpan sementara di memori selama halaman ini terbuka, tidak disimpan di perangkat Anda.</p>
     </div>
   </section>
 </main>
@@ -287,7 +285,7 @@ $('evInc').onclick = () => stepEvery(0.5);
 // batas waktu yang aman untuk iPhone/Safari lama (AbortSignal.timeout belum ada di sana)
 const timeoutSignal = (ms) => { if (window.AbortSignal && AbortSignal.timeout) return AbortSignal.timeout(ms); const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; };
 
-function status(msg, err) { ['status', 'status2'].forEach((id) => { const s = $(id); if (s) { s.textContent = msg; s.className = 'status' + (err ? ' err' : ''); } }); }
+function status(msg, err, small) { const s = $('status'); s.textContent = msg; s.className = 'status' + (err ? ' err' : '') + (small ? ' small' : ''); }
 
 /* ---------- Link ---------- */
 function ytId(raw) {
@@ -349,18 +347,13 @@ function parseSubs(txt) {
 
 /* ---------- Ambil subtitle otomatis (hanya di memori halaman ini; tidak disimpan di perangkat) ---------- */
 async function getSubs(raw) {
-  if (!ytId(raw)) return status('Ambil subtitle otomatis hanya untuk link YouTube. Tempel link YouTube di kolom atas, atau pakai subtitle manual.', true);
-  const btn = $('getSubs'); btn.disabled = true; btn.textContent = '⏳ Mengambil subtitle…';
   status('⏳ Mengambil subtitle dari video… (bisa sampai 20 detik)'); subs = null; acc = 0;
   try {
     const r = await (await fetch('/api/subtitles?url=' + encodeURIComponent(raw), { signal: timeoutSignal(25000) })).json();
     if (r.ok) { subs = { cues: r.cues, lang: r.language, auto: r.auto }; status(`✅ BERHASIL: ${r.cues.length} baris subtitle (bahasa: ${r.language}${r.auto ? ', otomatis' : ''}). Tekan Putar.`); }
-    else { status('❌ GAGAL: ' + (r.message || 'Subtitle gagal dimuat.') + (r.trace ? ' [' + r.trace + ']' : ''), true); $('pasteBox').open = true; }
-  } catch (e) { status('❌ GAGAL: server tidak menjawab tepat waktu. Tunggu sebentar lalu tekan tombol lagi.', true); }
-  btn.disabled = false;
-  btn.textContent = subs ? `✅ Subtitle siap (${subs.cues.length} baris) · ambil ulang` : '📥 Ambil subtitle otomatis dari video';
+    else { status('❌ GAGAL: ' + (r.message || 'Subtitle gagal dimuat.'), true, true); $('pasteBox').open = true; }
+  } catch (e) { status('❌ GAGAL: server tidak menjawab tepat waktu. Tekan Muat untuk mencoba lagi.', true, true); $('pasteBox').open = true; }
 }
-$('getSubs').onclick = () => getSubs($('link').value.trim());
 
 /* ---------- Memuat video ---------- */
 $('load').onclick = async () => {
@@ -374,7 +367,7 @@ $('load').onclick = async () => {
       await getSubs(raw);
     } else if (/\.(mp4|webm|mov)(\?|#|$)/i.test(raw)) {
       P = mountVideo(raw); $('stage').hidden = false; status('Video dimuat. Tempel subtitle manual di bawah agar sorotan kata bisa jalan.'); $('pasteBox').open = true;
-    } else status('Link belum didukung. Pakai link YouTube atau link file video (.mp4).', true);
+    } else status('Link belum didukung. Pakai link Video atau link file video (.mp4).', true);
   } catch (e) { status(e && e.message === 'timeout' ? 'Pemutar YouTube tidak merespons. Coba video lain, matikan pemblokir iklan untuk situs ini, atau muat ulang dengan Ctrl+F5.' : 'Gagal memuat. Periksa internet lalu coba lagi.', true); }
 };
 function openSite(kind) {
@@ -477,8 +470,6 @@ function renderCard(j) {
   if (c.katakana) body.append(kanaTable('Katakana', ps.length ? ps.map((p) => moras(p.reading)) : [moras(c.katakana)]));
   if (c.kanji) body.append(kanaTable('Kanji', ps.length ? [ps.map((p) => ({ k: p.kanji || p.reading, r: p.romaji }))] : [[{ k: c.kanji, r: String(c.romaji || '').toLowerCase() }]]));
   if (c.type === 'phrase') body.append(kanaBox('Per kata', c.readingWithRomaji, c.kanjiWithRomaji));
-  const sp = el('button', 'speak', '🔊 Dengar'); sp.onclick = () => { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(c.kanji || c.hiragana || c.katakana); u.lang = 'ja-JP'; speechSynthesis.speak(u); } catch (e) {} };
-  body.append(sp);
   if (j.viaTranslation) body.append(el('p', 'note', 'ℹ️ Subtitle video ini bukan bahasa Jepang, jadi kata dicari lewat terjemahan otomatis dan bisa kurang tepat.'));
 }
 function renderMsg(text) { $('cardBody').replaceChildren(el('p', 'note', text)); }
@@ -497,7 +488,7 @@ async function highlight() {
 }
 $('now').onclick = highlight;
 $('next').onclick = highlight;
-$('again').onclick = () => { try { speechSynthesis.cancel(); } catch (e) {} openSheet(false); acc = 0; if (P) P.play(); };
+$('again').onclick = () => { openSheet(false); acc = 0; if (P) P.play(); };
 </script>
 </body>
 </html>
