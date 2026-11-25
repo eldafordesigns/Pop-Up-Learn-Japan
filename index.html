@@ -218,7 +218,7 @@ details[open] summary::after{transform:rotate(45deg)}
 
   <section class="hero">
     <h1><b>Belajar</b><span class="jp">Jepang</span> dari Video</h1>
-    <p>Tempel link Video atau file .mp4, lalu temukan kata baru di sela-sela video favoritmu.</p>
+    <p>Tempel link video atau file .mp4, lalu temukan kata baru di sela-sela video favoritmu.</p>
   </section>
 
   <section class="card">
@@ -226,8 +226,8 @@ details[open] summary::after{transform:rotate(45deg)}
     <div class="row"><input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/..."><button id="load">Muat</button></div>
     <p id="status" class="status" role="status"></p>
     <details id="pasteBox"><summary>Subtitle tidak terbaca? Tempel manual</summary>
-      <p class="status" style="margin:6px 0 8px">Buka situs unduh subtitle &gt; unduh file .srt/.vtt &gt; input file pada kotak di bawah.</p>
-      <div class="row" style="margin-bottom:6px"><button id="openDown" type="button" class="alt" style="flex:1">🌐 Buka DownSub</button><button id="openSave" type="button" class="alt" style="flex:1">🌐 Buka SaveSubs</button></div>
+      <p class="status" style="margin:6px 0 8px;font-size:.72rem">Buka situs unduh subtitle&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;unduh file .srt/.vtt&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;input file pada kotak di bawah.</p>
+      <div class="row" style="margin-bottom:6px"><button id="openDown" type="button" class="alt" style="flex:1">Buka DownSub</button><button id="openSave" type="button" class="alt" style="flex:1">Buka SaveSubs</button></div>
       <p class="note" style="margin:0 0 10px">Link videomu otomatis disalin. Jika kolom di situs kosong, tempel saja (Ctrl+V). Hati-hati dengan iklan di situs itu: jangan pasang aplikasi atau ekstensi apa pun.</p>
       <label for="paste">Isi file subtitle (.srt atau .vtt)</label>
       <textarea id="paste" placeholder="Tempel isi subtitle di sini"></textarea>
@@ -239,7 +239,7 @@ details[open] summary::after{transform:rotate(45deg)}
   <section id="stage" hidden>
     <div id="player" class="player"></div>
     <div class="seek"><span id="tcur">0:00</span><input id="seekbar" type="range" min="0" max="1000" step="1" value="0" disabled aria-label="Posisi video"><span id="tdur">0:00</span></div>
-    <div class="ctl"><button id="back" class="alt" aria-label="Mundur 10 detik">⏪ 10 dtk</button><button id="toggle" aria-label="Putar atau jeda">▶ Putar</button><button id="fwd" class="alt" aria-label="Maju 10 detik">10 dtk ⏩</button></div>
+    <div class="ctl"><button id="back" class="alt" aria-label="Mundur 10 detik">&lt; 10 dtk</button><button id="toggle" aria-label="Putar atau jeda">▶ Putar</button><button id="fwd" class="alt" aria-label="Maju 10 detik">10 dtk &gt;</button></div>
     <div class="card">
       <div class="set">
         <div><label for="every">Jeda sorotan (menit)</label><div class="stepper"><button id="evDec" type="button" class="alt" aria-label="Kurangi jeda">−</button><input id="every" type="number" min="0.5" max="60" step="0.5" value="3" inputmode="decimal"><button id="evInc" type="button" class="alt" aria-label="Tambah jeda">+</button></div></div>
@@ -367,7 +367,7 @@ $('load').onclick = async () => {
       await getSubs(raw);
     } else if (/\.(mp4|webm|mov)(\?|#|$)/i.test(raw)) {
       P = mountVideo(raw); $('stage').hidden = false; status('Video dimuat. Tempel subtitle manual di bawah agar sorotan kata bisa jalan.'); $('pasteBox').open = true;
-    } else status('Link belum didukung. Pakai link Video atau link file video (.mp4).', true);
+    } else status('Link belum didukung. Pakai link video atau link file video (.mp4).', true);
   } catch (e) { status(e && e.message === 'timeout' ? 'Pemutar YouTube tidak merespons. Coba video lain, matikan pemblokir iklan untuk situs ini, atau muat ulang dengan Ctrl+F5.' : 'Gagal memuat. Periksa internet lalu coba lagi.', true); }
 };
 function openSite(kind) {
@@ -388,7 +388,7 @@ $('file').onchange = async (e) => {
 $('usePaste').onclick = () => {
   const cues = parseSubs($('paste').value);
   if (!cues.length) return status('Subtitle tidak terbaca. Pastikan isinya format .srt atau .vtt.', true);
-  subs = { cues, lang: $('pasteLang').value, auto: false }; status(`✅ ${cues.length} baris subtitle dipakai.`);
+  subs = { cues, lang: $('pasteLang').value, auto: false }; status(`✓ ${cues.length} baris subtitle dipakai.`);
 };
 
 /* ---------- Tombol video ---------- */
@@ -456,6 +456,27 @@ function moras(str) { // "らやまは" -> [{k:'ら',r:'ra'},...]; ゃゅょ & �
   out.forEach((m, i) => { if (m.d) { const n = out[i + 1]; m.r = n && n.r ? (n.r.startsWith('ch') ? 't' : n.r[0]) : ''; } });
   return out;
 }
+const toHira = (c) => c.replace(/[\u30A1-\u30F6]/g, (x) => String.fromCharCode(x.charCodeAt(0) - 0x60));
+const isKana = (ch) => /[\u3041-\u3096\u30A1-\u30F6\u30FC]/.test(ch);
+function kanjiCells(kanji, reading, fallbackRomaji) { // -> [{k,r},...]: tiap kanji / huruf kana punya kotak sendiri + ejaannya
+  const ks = [...String(kanji || '')], rd = toHira(String(reading || ''));
+  const whole = () => [{ k: String(kanji || ''), r: String(fallbackRomaji || '').toLowerCase() }];
+  if (!ks.length) return whole();
+  if (ks.every(isKana)) return moras(ks.join(''));
+  const runs = [];
+  ks.forEach((c) => { const kana = isKana(c), L = runs[runs.length - 1]; if (L && L.kana === kana) L.s += c; else runs.push({ kana, s: c }); });
+  const out = []; let ri = 0;
+  for (let i = 0; i < runs.length; i++) {
+    const R = runs[i];
+    if (R.kana) { const seg = toHira(R.s); if (rd.slice(ri, ri + seg.length) !== seg) return whole(); out.push(...moras(R.s)); ri += seg.length; continue; }
+    const nx = runs[i + 1]; let end;
+    if (!nx) end = rd.length;
+    else { const s = toHira(nx.s); end = i + 2 >= runs.length ? (rd.endsWith(s) ? rd.length - s.length : -1) : rd.indexOf(s, ri + 1); }
+    if (end <= ri) return whole();
+    out.push({ k: R.s, r: moras(rd.slice(ri, end)).map((m) => m.r).join('') }); ri = end;
+  }
+  return ri === rd.length ? out : whole();
+}
 function kanaTable(label, groups) { // groups: [[{k,r},...],...] -> kotak: tulisan Jepang di atas, ejaan di bawah
   const d = el('div', 'kana'), w = el('div', 'kt'); d.append(el('small', '', label));
   groups.forEach((g) => { if (!g.length) return; const gr = el('div', 'kg'); g.forEach((m) => { const c = el('div', 'kc'); c.append(el('b', '', m.k), el('i', '', m.r || '\u00a0')); gr.append(c); }); w.append(gr); });
@@ -468,7 +489,7 @@ function renderCard(j) {
   const ps = c.parts || [];
   if (c.hiragana) body.append(kanaTable('Hiragana', ps.length ? ps.map((p) => moras(p.reading)) : [moras(c.hiragana)]));
   if (c.katakana) body.append(kanaTable('Katakana', ps.length ? ps.map((p) => moras(p.reading)) : [moras(c.katakana)]));
-  if (c.kanji) body.append(kanaTable('Kanji', ps.length ? [ps.map((p) => ({ k: p.kanji || p.reading, r: p.romaji }))] : [[{ k: c.kanji, r: String(c.romaji || '').toLowerCase() }]]));
+  if (c.kanji) body.append(kanaTable('Kanji', ps.length ? ps.map((p) => (p.kanji ? kanjiCells(p.kanji, p.reading, p.romaji) : moras(p.reading))) : [kanjiCells(c.kanji, c.hiragana || c.katakana || '', c.romaji)]));
   if (c.type === 'phrase') body.append(kanaBox('Per kata', c.readingWithRomaji, c.kanjiWithRomaji));
   if (j.viaTranslation) body.append(el('p', 'note', 'ℹ️ Subtitle video ini bukan bahasa Jepang, jadi kata dicari lewat terjemahan otomatis dan bisa kurang tepat.'));
 }
