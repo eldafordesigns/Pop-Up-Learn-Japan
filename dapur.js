@@ -388,7 +388,9 @@ function defaultTokenizer() {
   return kuromojiPromise.then((tk) => (text) => tk.tokenize(text));
 }
 
-const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.youtube.com https://s.ytimg.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com; img-src 'self' data: https://i.ytimg.com; media-src *; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
+// frame-src https: dan script-src animeembed.com: dibutuhkan agar pemutar iframe (AnimeEmbed, VidRift, dan situs lain) bisa tampil di dalam aplikasi.
+// Referrer-Policy strict-origin-when-cross-origin: pemutar tertanam mengenali halaman induknya dari origin (sama dengan <meta name="referrer"> di index.html).
+const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.youtube.com https://s.ytimg.com https://animeembed.com; frame-src https:; img-src 'self' data: https://i.ytimg.com; media-src *; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
 function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, indexPath = path.join(__dirname, 'index.html'), supadataKey = process.env.SUPADATA_API_KEY } = {}) {
   const hits = new Map();
@@ -428,7 +430,7 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
 
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
         let html; try { html = fs.readFileSync(indexPath); } catch { return send(404, { ok: false, message: 'Halaman belum ada.' }); }
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP, 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-cache' });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP, 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Cache-Control': 'no-cache' });
         return res.end(html);
       }
       if (req.method === 'GET' && url.pathname === '/api/health') return send(200, { ok: true });
