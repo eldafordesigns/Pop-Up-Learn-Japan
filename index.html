@@ -171,6 +171,16 @@ details[open] summary::after{transform:rotate(45deg)}
 .seek input[type=range]::-moz-range-progress{height:8px;border-radius:99px;background:#fff}
 .seek input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:#fff;border:0;box-shadow:0 2px 10px rgba(60,30,160,.5)}
 
+/* ---------- Manual Subtitle Timeline (hanya untuk sumber video yang tidak bisa dikontrol) ---------- */
+.mrow{display:flex;gap:10px;flex-wrap:wrap;align-items:stretch}
+.mfields{display:flex;gap:6px;flex:1 1 190px;min-width:0}
+.mfields input{flex:1 1 0;min-width:0;text-align:center;padding:11px 4px;-moz-appearance:textfield;appearance:textfield}
+.mfields input::-webkit-outer-spin-button,.mfields input::-webkit-inner-spin-button{-webkit-appearance:none;appearance:none;margin:0;display:none}
+.mrow>button{flex:0 0 auto}
+.mctl{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:10px;margin-top:12px}
+.mctl button{min-height:48px;font-size:.88rem;padding:0 8px}
+.mnote{font-size:.78rem;color:var(--acc2);margin:10px 0 0}
+
 /* ---------- Tabel kana + ejaan ---------- */
 .kt{display:flex;flex-wrap:wrap;gap:10px 16px;margin-top:8px}
 .kg{display:flex}
@@ -244,6 +254,23 @@ details[open] summary::after{transform:rotate(45deg)}
     <div class="seek"><span id="tcur">0:00</span><input id="seekbar" type="range" min="0" max="1000" step="1" value="0" disabled aria-label="Video position"><span id="tdur">0:00</span></div>
     <div class="ctl"><button id="back" class="alt" aria-label="Back 10 seconds">&lt; 10 sec</button><button id="toggle" aria-label="Play or pause">▶ Play</button><button id="fwd" class="alt" aria-label="Forward 10 seconds">10 sec &gt;</button></div>
     <button id="sbxBtn" type="button" class="alt" hidden style="width:100%;min-height:44px;font-size:.8rem;margin:-8px 0 14px"></button>
+    <section id="manual" class="card" hidden aria-label="Manual subtitle timeline">
+      <div id="mSetup">
+        <p class="status" style="margin:0 0 12px">Enter the video duration to synchronize subtitles, then press Start Subtitles at the same time as the video.</p>
+        <label for="mh">Video duration (hours · minutes · seconds)</label>
+        <div class="mrow">
+          <div class="mfields"><input id="mh" type="number" inputmode="numeric" min="0" max="24" step="1" placeholder="h" aria-label="Hours"><input id="mm" type="number" inputmode="numeric" min="0" step="1" placeholder="min" aria-label="Minutes"><input id="ms" type="number" inputmode="numeric" min="0" step="1" placeholder="sec" aria-label="Seconds"></div>
+          <button id="mstart" type="button">START SUBTITLES</button>
+        </div>
+      </div>
+      <div id="mRun" hidden>
+        <div class="seek" style="margin-top:0"><span id="mcur">0:00</span><input id="mbar" type="range" min="0" max="1" step="1" value="0" aria-label="Subtitle timeline position"><span id="mtot">0:00</span></div>
+        <div class="mctl"><button id="mback" type="button" class="alt" aria-label="Back 10 seconds on the subtitle timeline">&lt; 10 sec</button><button id="mpause" type="button">⏸&#xFE0E; Pause subtitles</button><button id="mfwd" type="button" class="alt" aria-label="Forward 10 seconds on the subtitle timeline">10 sec &gt;</button></div>
+        <p class="mnote">This timeline only controls the subtitles and the Highlight Words timing. It does NOT control the external video, so match the two positions yourself.</p>
+        <button id="mreset" type="button" class="alt" style="width:100%;margin-top:10px;min-height:44px;font-size:.8rem">Change duration / restart timeline</button>
+      </div>
+      <p id="mmsg" class="status" role="status"></p>
+    </section>
     <div class="card">
       <div class="set">
         <div><label for="every">Highlight interval (minutes)</label><div class="stepper"><button id="evDec" type="button" class="alt" aria-label="Decrease interval">−</button><input id="every" type="number" min="0.5" max="60" step="0.5" value="3" inputmode="decimal"><button id="evInc" type="button" class="alt" aria-label="Increase interval">+</button></div></div>
@@ -498,13 +525,14 @@ async function getPageSubs(raw, seq) {
       subs = { cues: r.cues, lang: r.language && r.language !== 'und' ? r.language : $('pasteLang').value, auto: false };
       $('pasteBox').open = false;
       status(`✅ ${r.cues.length} subtitle lines retrieved automatically from the video source (language: ${r.label || r.language}).` + (P && P.viewOnly ? note : ' Press Play.'));
+      offerManual();
     } else { status('❌ ' + (r.message || 'Subtitles could not be retrieved automatically.') + note, true, true); $('pasteBox').open = true; }
   } catch (e) { if (seq !== loadSeq) return; status('❌ FAILED: the server did not respond in time. Press Load to try again, or use "Paste manually".' + note, true, true); $('pasteBox').open = true; }
 }
 
 /* ---------- Memuat video ---------- */
 $('load').onclick = async () => {
-  const raw = $('link').value.trim(); const seq = ++loadSeq; lastWin = null; $('sbxBtn').hidden = true; subs = null; shown = []; curWin = null; resetTimer(); if (P) { try { P.pause(); } catch (e) {} if (P.destroy) { try { P.destroy(); } catch (e) {} P = null; } } setCtl(true);
+  const raw = $('link').value.trim(); const seq = ++loadSeq; lastWin = null; $('sbxBtn').hidden = true; subs = null; shown = []; curWin = null; resetTimer(); mReset(true); if (P) { try { P.pause(); } catch (e) {} if (P.destroy) { try { P.destroy(); } catch (e) {} P = null; } } setCtl(true);
   if (!/^https?:\/\//i.test(raw)) return status('Paste a link that starts with https://', true);
   const id = ytId(raw);
   try {
@@ -540,6 +568,7 @@ $('usePaste').onclick = () => {
   const cues = parseSubs($('paste').value);
   if (!cues.length) return status('Subtitle not detected. Make sure the content is in .srt or .vtt format.', true);
   subs = { cues, lang: $('pasteLang').value, auto: false }; status(`✓ ${cues.length} subtitle lines applied.`);
+  if (P && P.viewOnly) { offerManual(); if (!mn.started) status(`✓ ${cues.length} subtitle lines applied. This video cannot be controlled by the app: enter its duration below, then press START SUBTITLES.`); }
   $('pasteBox').open = false; // panel input hanya terlihat saat memasukkan/mengganti subtitle; isi subtitle (subs) & bahasa tetap
 };
 
@@ -604,12 +633,89 @@ function stepTimer(tm, t, nowSec, I) {
   if (!act && t - tm.winStart >= I) act = 'fire';
   return act;
 }
+// ---- Manual Subtitle Timeline (jam subtitle mandiri; tidak membaca atau mengontrol video eksternal) ----
+const MAN_MAX = 24 * 3600;
+// Jam, menit, detik (teks kosong = 0) -> total detik; NaN bila tidak valid (bukan bilangan bulat, negatif, 0, atau lebih dari 24 jam).
+function durationFrom(h, m, s) {
+  const v = [h, m, s].map((x) => (x === '' || x == null ? 0 : Number(x)));
+  if (v.some((x) => !isFinite(x) || x < 0 || x !== Math.floor(x))) return NaN;
+  const t = v[0] * 3600 + v[1] * 60 + v[2];
+  return t > 0 && t <= MAN_MAX ? t : NaN;
+}
+// c = { pos, at, running, dur }; nowMs = jam dinding (ms). Posisi maju hanya saat running dan berhenti di dur.
+function mPos(c, nowMs) { const t = c.pos + (c.running ? (nowMs - c.at) / 1000 : 0); return Math.max(0, Math.min(t, c.dur)); }
+function mSet(c, t, nowMs) { c.pos = Math.max(0, Math.min(Number(t) || 0, c.dur)); c.at = nowMs; }
+function mRun(c, run, nowMs) { c.pos = mPos(c, nowMs); c.at = nowMs; c.running = !!run && c.pos < c.dur; }
+function mDone(c, nowMs) { if (c.running && mPos(c, nowMs) >= c.dur) { mRun(c, false, nowMs); return true; } return false; }
+// NEXT di mode manual: awal kandidat tetap, akhir kandidat MENGIKUTI waktu subtitle terkini (rentang tidak membeku di interval awal).
+function manualNextWindow(win, t) { return { from: win.from, to: Math.max(win.to, t) }; }
 /* WINDOW-LOGIC-END */
 const tm = { winStart: 0, lastT: null, lastWall: 0 };
+const mn = { started: false, clock: { pos: 0, at: 0, running: false, dur: 0 } }; // Manual Subtitle Timeline: HANYA aktif untuk sumber viewOnly
+const isManual = () => mn.started;
+const mNow = () => mPos(mn.clock, performance.now());
 function resetTimer() { tm.winStart = 0; tm.lastT = null; }
-function restartWindow() { let t = 0; try { t = (P && P.time()) || 0; } catch (e) {} tm.winStart = t; tm.lastT = t; tm.lastWall = performance.now() / 1000; }
+function restartWindow() { let t = 0; try { t = mn.started ? mNow() : ((P && P.time()) || 0); } catch (e) {} tm.winStart = t; tm.lastT = t; tm.lastWall = performance.now() / 1000; }
+/* ---------- Manual Subtitle Timeline: komponen & kontrol ----------
+   Dipakai hanya bila sumber video tidak bisa dikontrol aplikasi (P.viewOnly: pemutar ditampilkan sebagai jendela).
+   Sumber yang bisa dikontrol (YouTube, MP4, AnimeEmbed, VidRift) tidak pernah melewati kode ini. */
+const mb = $('mbar'); let mDrag = false;
+function mMsg(text, err) { const e = $('mmsg'); e.textContent = text; e.className = 'status' + (err ? ' err' : ''); }
+function manualPaint() {
+  const c = mn.clock, p = mPos(c, performance.now()), d = c.dur;
+  if (!mDrag) { $('mcur').textContent = fmt(p); mb.value = Math.floor(p); }
+  mb.style.setProperty('--pct', (d ? p / d * 100 : 0) + '%');
+  $('mtot').textContent = fmt(d);
+  $('mpause').textContent = c.running ? '⏸\uFE0E Pause subtitles' : '▶ Resume subtitles';
+  mMsg(c.running ? 'Subtitle timer is running.' : p >= d ? 'Subtitle timer stopped: the entered video duration was reached.' : 'Subtitle timer is paused.');
+}
+function offerManual() { // dipanggil setelah subtitle terpasang (Apply atau otomatis); hanya menampilkan komponen bila video tidak bisa dikontrol
+  if (!(P && P.viewOnly && subs)) return;
+  $('manual').hidden = false;
+  try { $('manual').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) {}
+}
+function mReset(hide) {
+  mn.started = false; mn.clock.running = false; mn.clock.pos = 0; mn.clock.dur = 0; mDrag = false;
+  $('mSetup').hidden = false; $('mRun').hidden = true; mMsg('');
+  if (hide) $('manual').hidden = true;
+}
+function mSeekTo(t) { // geser timeline: jam dan interval Highlight Words langsung mengikuti posisi baru
+  const now = performance.now(); mSet(mn.clock, t, now);
+  const p = mNow(); tm.winStart = p; tm.lastT = p; tm.lastWall = now / 1000;
+  if (!$('sheet').hidden && curWin) curWin = { from: p, to: p };
+}
+$('mstart').onclick = () => {
+  if (mn.started) return; // hanya SATU penghitung; tekan lagi tidak membuat timer baru
+  const d = durationFrom($('mh').value, $('mm').value, $('ms').value);
+  if (isNaN(d)) return mMsg('Enter a valid video duration using whole numbers (more than 0 and up to 24 hours).', true);
+  if (!subs || !subs.cues.length) return mMsg('Apply a subtitle first.', true);
+  const now = performance.now(); mn.started = true; mn.clock.dur = d; mSet(mn.clock, 0, now); mRun(mn.clock, true, now);
+  tm.winStart = 0; tm.lastT = 0; tm.lastWall = now / 1000; shown = []; shownKey = null; curWin = null;
+  $('mSetup').hidden = true; $('mRun').hidden = false; mb.max = d; manualPaint();
+};
+$('mpause').onclick = () => {
+  if (!mn.started) return;
+  const c = mn.clock, now = performance.now(); mRun(c, !c.running, now); manualPaint();
+};
+mb.oninput = () => { mDrag = true; const v = Number(mb.value) || 0; $('mcur').textContent = fmt(v); mSeekTo(v); manualPaint(); };
+mb.onchange = () => { mDrag = false; };
+mb.onpointerup = () => setTimeout(() => { mDrag = false; }, 80);
+$('mback').onclick = () => { if (mn.started) { mSeekTo(mNow() - 10); manualPaint(); } };
+$('mfwd').onclick = () => { if (mn.started) { mSeekTo(mNow() + 10); manualPaint(); } };
+$('mreset').onclick = () => mReset(false);
+function manualTick() {
+  const now = performance.now(), c = mn.clock; mDone(c, now);
+  const t = mPos(c, now); manualPaint();
+  if (subs) { const cue = subs.cues.filter((x) => x.start <= t && x.end >= t)[0]; $('sub').textContent = cue ? cue.text : ''; }
+  const I = intervalSeconds($('every').value), act = stepTimer(tm, t, now / 1000, I);
+  if (!$('sheet').hidden || busy) return; // pop-up terbuka: jam subtitle TETAP berjalan, hanya sorotan baru yang tidak dipicu
+  if (!subs) { tm.winStart = t; return; }
+  if (c.running && act === 'fire') highlight({ from: tm.winStart, to: tm.winStart + I });
+}
+
 // Video yang dijeda (termasuk saat pop-up tampil) tidak maju: waktu video tetap, jadi interval ikut berhenti.
 setInterval(() => {
+  if (mn.started) return manualTick(); // sumber tidak bisa dikontrol: pakai jam subtitle manual
   if (!P) return;
   let playing = false, t = 0; try { playing = P.playing(); t = P.time() || 0; } catch (e) {}
   $('toggle').textContent = playing ? '⏸\uFE0E Pause' : '▶ Play';
@@ -729,28 +835,32 @@ function renderCard(j) {
 function renderMsg(text) { $('cardBody').replaceChildren(el('p', 'note', text)); }
 
 const NO_WORDS_MSG = 'No matching words found in this section. Press PLAY AGAIN to continue the video.';
+const MANUAL_NO_WORDS_MSG = 'No matching words found yet. The subtitle timer keeps running: press NEXT again in a moment, or press CLOSE.';
+const manualText = (msg) => String(msg || '').replace(/Press PLAY AGAIN to continue the video\./g, 'The subtitle timer keeps running: press NEXT again in a moment, or press CLOSE.');
 // win = { from, to } dalam detik video. Tanpa win (tombol ✨): interval terakhir sebelum posisi video saat ini.
 async function highlight(win) {
   if (!P || busy) return;
   if (!subs || !subs.cues.length) return status('No subtitles yet. Load a video that has subtitles or paste them manually.', true);
+  const man = isManual(); // mode manual: video eksternal tetap berjalan, jam subtitle juga
   busy = true; try { P.pause(); } catch (e) {}
-  if (!win) { let t = 0; try { t = P.time() || 0; } catch (e) {} win = manualWindow(subs.cues, t, intervalSeconds($('every').value)); }
-  curWin = win; // NEXT memakai interval yang sama
-  const wk = win.from + '|' + win.to; if (wk !== shownKey) { shown = []; shownKey = wk; } // interval baru / seek: riwayat kata interval sebelumnya tidak ikut
+  if (!win) { let t = 0; try { t = man ? mNow() : (P.time() || 0); } catch (e) {} win = manualWindow(subs.cues, t, intervalSeconds($('every').value)); }
+  curWin = win; // NEXT memakai interval yang sama (mode manual: awal sama, akhir mengikuti waktu subtitle terkini)
+  const wk = man ? 'm|' + win.from : win.from + '|' + win.to; if (wk !== shownKey) { shown = []; shownKey = wk; } // interval baru / seek: riwayat kata interval sebelumnya tidak ikut (mode manual: kunci hanya awal, agar kata yang sudah tampil tidak berulang saat akhir rentang maju)
+  $('again').textContent = man ? '✕ CLOSE' : '▶ PLAY AGAIN';
   openSheet(true); renderMsg('⏳ Finding words for you…');
   const lines = capLines(cuesIn(subs.cues, win.from, win.to), MAX_LINES, MAX_CHARS);
-  if (!lines.length) { renderMsg(NO_WORDS_MSG); busy = false; return; } // memang tidak ada subtitle dalam interval ini
+  if (!lines.length) { renderMsg(man ? MANUAL_NO_WORDS_MSG : NO_WORDS_MSG); busy = false; return; } // memang tidak ada subtitle dalam interval ini
   try {
     const r = await fetch('/api/highlight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines, sourceLang: subs.lang, wordCount: Number($('wc').value), exclude: shown.slice(-400) }) });
     const j = await r.json();
     if (Array.isArray(j.skipped)) shown.push(...j.skipped); // kandidat yang tidak bisa diverifikasi: jangan dicoba lagi di interval ini
-    if (j.ok) { shown.push(j.surface); if (j.key) shown.push(j.key); renderCard(j); } else renderMsg(j.message || 'Failed to create the word card.');
+    if (j.ok) { shown.push(j.surface); if (j.key) shown.push(j.key); renderCard(j); } else { const m = j.message || 'Failed to create the word card.'; renderMsg(man ? manualText(m) : m); }
   } catch (e) { renderMsg('Cannot reach the server. Check your internet, then press NEXT.'); }
   busy = false;
 }
 $('now').onclick = () => highlight();
-$('next').onclick = () => highlight(curWin);
-$('again').onclick = () => { openSheet(false); restartWindow(); if (P) P.play(); };
+$('next').onclick = () => highlight(isManual() && curWin ? manualNextWindow(curWin, mNow()) : curWin);
+$('again').onclick = () => { openSheet(false); restartWindow(); if (P && !isManual()) P.play(); };
 </script>
 </body>
 </html>

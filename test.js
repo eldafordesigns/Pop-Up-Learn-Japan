@@ -321,7 +321,7 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
   // ---- logika interval di index.html (blok WINDOW-LOGIC dimuat langsung dari file; pemutar & jam disimulasikan) ----
   const html = fsx.readFileSync(pathx.join(__dirname, 'index.html'), 'utf8');
   const block = html.split('/* WINDOW-LOGIC-START')[1].split('/* WINDOW-LOGIC-END */')[0];
-  const W = vm.runInNewContext(block.slice(block.indexOf('*/') + 2) + '; ({ cuesIn, capLines, manualWindow, stepTimer, intervalSeconds })', {});
+  const W = vm.runInNewContext(block.slice(block.indexOf('*/') + 2) + '; ({ cuesIn, capLines, manualWindow, stepTimer, intervalSeconds, durationFrom, mPos, mSet, mRun, mDone, manualNextWindow })', {});
   const cues = Array.from({ length: 200 }, (_, i) => ({ start: i * 3, end: i * 3 + 2.5, text: 'baris ' + i })); // 1 cue tiap 3 detik, 10 menit
   // pemutar simulasi: langkah 0,5 dtk seperti setInterval di halaman; popup = video dijeda, lalu PLAY AGAIN memulai jendela baru
   function sim({ I = 30, steps = 400, events = {}, popupSteps = 60 }) {
@@ -429,6 +429,87 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
       // tombol ✨ pada menit ke-5 tanpa timer
       run("subs = { cues: __cues, lang: 'ja' }"); els.again.onclick(); els.now.onclick(); await new Promise((r) => setImmediate(r));
       assert.strictEqual(fetches.length, 5);
+  });
+
+
+  // =====================================================================
+  // MANUAL SUBTITLE TIMELINE (hanya sumber video yang tidak bisa dikontrol). Pemutar & jam TIRUAN; ini tes logika + DOM tiruan, BUKAN tes di browser/HiAnime sungguhan.
+  // =====================================================================
+  await ok('Manual: durasi jam/menit/detik divalidasi (kosong=0, bilangan bulat, >0, maks 24 jam)', () => {
+    assert.strictEqual(W.durationFrom('', '23', '40'), 1420); assert.strictEqual(W.durationFrom('1', '5', '30'), 3930); assert.strictEqual(W.durationFrom('', '90', ''), 5400);
+    for (const bad of [['', '', ''], ['0', '0', '0'], ['', '1.5', ''], ['-1', '', '5'], ['25', '', ''], ['a', '', ''], ['', '', '1e9']]) assert.ok(isNaN(W.durationFrom(...bad)), JSON.stringify(bad));
+  });
+  await ok('Manual: jam mulai dari 0, pause menahan, resume lanjut, seek mengikuti, berhenti di batas durasi', () => {
+    const c = { pos: 0, at: 0, running: false, dur: 100 };
+    W.mSet(c, 0, 1000); W.mRun(c, true, 1000); assert.strictEqual(W.mPos(c, 31000), 30);
+    W.mRun(c, false, 31000); assert.strictEqual(W.mPos(c, 99000), 30); // pause: waktu diam
+    W.mRun(c, true, 99000); assert.strictEqual(W.mPos(c, 109000), 40); // resume
+    W.mSet(c, 10, 109000); assert.strictEqual(W.mPos(c, 111000), 12); // seek mundur
+    assert.strictEqual(W.mDone(c, 150000), false); W.mSet(c, 95, 150000); assert.strictEqual(W.mDone(c, 160000), true); assert.strictEqual(c.running, false); assert.strictEqual(W.mPos(c, 999999), 100);
+    W.mRun(c, true, 200000); assert.strictEqual(c.running, false, 'di batas durasi tidak bisa jalan lagi sebelum digeser mundur');
+  });
+  await ok('Manual: akhir rentang NEXT mengikuti waktu subtitle; awal tetap', () => {
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(W.manualNextWindow({ from: 0, to: 30 }, 12))), { from: 0, to: 30 });
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(W.manualNextWindow({ from: 0, to: 30 }, 75))), { from: 0, to: 75 });
+  });
+
+  await ok('Manual (halaman, DOM tiruan): panel hanya untuk sumber viewOnly; START satu timer; sorotan; waktu jalan saat pop-up terbuka; NEXT memakai rentang terbaru; pause; seek; batas durasi', async () => {
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+    const mkEl = (id) => ({ id, style: { setProperty() {} }, classList: { add() {}, remove() {}, toggle() {} }, children: [], textContent: '', className: '', value: id === 'every' ? '0.5' : id === 'wc' ? '1' : '', hidden: id === 'sheet' || id === 'stage' || id === 'manual' || id === 'mRun', open: false, disabled: false,
+      append(...a) { this.children.push(...a); }, replaceChildren(...a) { this.children = a; }, setAttribute() {}, addEventListener() {}, focus() {}, click() {}, appendChild(c) { this.children.push(c); return c; }, set innerHTML(v) {}, get innerHTML() { return ''; } });
+    const els = {}, intervals = [], fetches = []; let WALL = 0, played = 0;
+    const ctx = vm.createContext({
+      document: { getElementById: (id) => (els[id] ||= mkEl(id)), createElement: (t) => mkEl(t), documentElement: { style: { setProperty() {} } }, head: { appendChild() {} } },
+      window: {}, localStorage: { getItem: () => null, setItem() {} }, performance: { now: () => WALL * 1000 },
+      setInterval: (fn) => { intervals.push(fn); return intervals.length; }, setTimeout: () => 0, clearTimeout() {}, addEventListener() {}, removeEventListener() {},
+      innerWidth: 1000, innerHeight: 800, location: { origin: 'http://x' }, navigator: { clipboard: { writeText() {} } }, URL, AbortController, console,
+      fetch: async (url, opt) => { fetches.push(JSON.parse(opt.body)); return { json: async () => ({ ok: true, surface: 'w' + fetches.length, card: { type: 'single', romaji: 'x', meaningId: 'x', meaningEn: 'y', hiragana: 'あ', katakana: null, kanji: null, parts: [] } }) }; },
+    });
+    vm.runInContext(script, ctx); const run = (c) => vm.runInContext(c, ctx);
+    ['mh', 'mm', 'ms', 'mstart', 'mRun', 'mSetup', 'mtot', 'mmsg', 'mreset', 'mpause', 'mbar', 'mcur', 'manual', 'sub', 'again', 'next', 'cardBody', 'status', 'paste', 'usePaste', 'every', 'sheet'].forEach((id) => ctx.document.getElementById(id));
+    const tick = (n = 1) => { for (let i = 0; i < n; i++) { WALL += 0.5; intervals.forEach((f) => f()); } };
+    const flush = () => new Promise((r) => setImmediate(r));
+    const nIntervals = intervals.length;
+    const srt = Array.from({ length: 100 }, (_, i) => { const f = (x) => '00:' + String(Math.floor(x / 60)).padStart(2, '0') + ':' + String(x % 60).padStart(2, '0') + ',000'; return (i + 1) + '\n' + f(i * 3) + ' --> ' + f(i * 3 + 2) + '\nc' + i; }).join('\n\n');
+    els.every.value = '0.5'; els.paste.value = srt;
+    // sumber yang BISA dikontrol: panel manual tidak muncul
+    run("P = { play() {}, pause() {}, seekBy() {}, seek() {}, time: () => 0, dur: () => 300, playing: () => false }");
+    els.usePaste.onclick(); assert.strictEqual(els.manual.hidden, true, 'sumber terkendali: tanpa panel manual');
+    assert.ok(!els.status.textContent.includes('START SUBTITLES'));
+    // sumber yang TIDAK bisa dikontrol (viewOnly)
+    run("P = { viewOnly: true, play() { __played++; }, pause() {}, seekBy() {}, seek() {}, time: () => 0, dur: () => 0, playing: () => false }"); ctx.__played = 0;
+    els.usePaste.onclick(); assert.strictEqual(els.manual.hidden, false); assert.ok(els.status.textContent.includes('START SUBTITLES'));
+    // input tidak valid -> pesan, timer tidak mulai
+    els.mh.value = ''; els.mm.value = ''; els.ms.value = ''; els.mstart.onclick(); assert.strictEqual(run('mn.started'), false); assert.ok(els.mmsg.className.includes('err'));
+    // durasi 5 menit, START
+    els.mm.value = '5'; els.mstart.onclick(); assert.strictEqual(run('mn.started'), true); assert.strictEqual(els.mRun.hidden, false); assert.strictEqual(els.mSetup.hidden, true); assert.strictEqual(els.mtot.textContent, '5:00');
+    els.mstart.onclick(); els.mstart.onclick(); assert.strictEqual(intervals.length, nIntervals, 'START tidak membuat timer tambahan'); // satu penghitung saja
+    tick(59); assert.strictEqual(fetches.length, 0, 'belum 30 detik'); assert.ok(Math.abs(run('mNow()') - 29.5) < 0.01);
+    tick(1); await flush(); assert.strictEqual(fetches.length, 1); assert.strictEqual(fetches[0].lines[0].text, 'c0'); assert.strictEqual(fetches[0].lines.at(-1).text, 'c9');
+    assert.strictEqual(els.sheet.hidden, false); assert.strictEqual(els.again.textContent, '✕ CLOSE');
+    // pop-up terbuka: jam TETAP berjalan, tidak ada sorotan baru otomatis
+    tick(40); assert.ok(Math.abs(run('mNow()') - 50) < 0.01, 'waktu subtitle jalan saat pop-up terbuka'); assert.strictEqual(fetches.length, 1);
+    // NEXT: rentang mengikuti waktu terbaru (0-50), riwayat tidak dibuang
+    els.next.onclick(); await flush(); assert.strictEqual(fetches.length, 2); assert.strictEqual(fetches[1].lines[0].text, 'c0'); assert.strictEqual(fetches[1].lines.at(-1).text, 'c16', 'cue sampai detik 50 ikut kandidat'); assert.deepStrictEqual(fetches[1].exclude, ['w1']);
+    tick(40); els.next.onclick(); await flush(); assert.strictEqual(fetches[2].lines.at(-1).text, 'c23'); assert.ok(fetches[2].lines.length > fetches[1].lines.length); assert.deepStrictEqual(fetches[2].exclude, ['w1', 'w2'], 'kata yang sudah tampil tetap dieliminasi (tidak berulang)');
+    // CLOSE: video tidak "diputar" lagi oleh aplikasi; jendela baru mulai dari waktu subtitle sekarang
+    els.again.onclick(); assert.strictEqual(els.sheet.hidden, true); assert.strictEqual(ctx.__played, 0); const tClose = run('mNow()');
+    tick(59); assert.strictEqual(fetches.length, 3); tick(1); await flush(); assert.strictEqual(fetches.length, 4); assert.deepStrictEqual(fetches[3].exclude, [], 'interval baru: riwayat baru');
+    const l0 = Number(fetches[3].lines[0].text.slice(1)); assert.ok(l0 * 3 + 2 > tClose - 0.01 && l0 * 3 <= tClose + 3, 'jendela baru dimulai dari waktu saat CLOSE');
+    els.again.onclick();
+    // pause: jam & sorotan berhenti; resume: lanjut
+    els.mpause.onclick(); const tp = run('mNow()'); tick(200); assert.strictEqual(run('mNow()'), tp); assert.strictEqual(fetches.length, 4); assert.ok(els.mmsg.textContent.includes('paused'));
+    els.mpause.onclick(); tick(2); assert.ok(run('mNow()') > tp);
+    // geser timeline: subtitle & jendela langsung mengikuti posisi baru
+    els.mbar.value = '150'; els.mbar.oninput(); assert.ok(Math.abs(run('mNow()') - 150) < 0.01); tick(2); assert.strictEqual(els.sub.textContent, 'c50');
+    tick(56); assert.strictEqual(fetches.length, 4, 'belum penuh satu interval dari posisi baru'); tick(3); await flush(); assert.strictEqual(fetches.length, 5); assert.strictEqual(fetches[4].lines[0].text, 'c50'); assert.deepStrictEqual(fetches[4].exclude, []);
+    els.again.onclick();
+    // tidak ada cue pada rentang -> tidak ada kata asal-asalan, server tidak dipanggil
+    run("subs = { cues: subs.cues.slice(0, 5), lang: 'ja' }"); els.mbar.value = '200'; els.mbar.oninput(); tick(61); await flush(); assert.strictEqual(fetches.length, 5); assert.ok(JSON.stringify(els.cardBody.children).includes('CLOSE')); els.again.onclick();
+    // batas durasi: berhenti
+    els.mbar.value = '299'; els.mbar.oninput(); tick(4); assert.strictEqual(run('mn.clock.running'), false); assert.strictEqual(run('mNow()'), 300); assert.ok(els.mmsg.textContent.includes('duration was reached'));
+    // Load video lain: panel & timer dibersihkan
+    els.mreset.onclick(); assert.strictEqual(run('mn.started'), false); assert.strictEqual(els.mSetup.hidden, false); assert.strictEqual(intervals.length, nIntervals);
   });
 
 
