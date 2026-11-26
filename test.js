@@ -281,11 +281,11 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
     const all = pools.flat().map((c) => c.surface).sort();
     assert.deepStrictEqual(all, ['カキーサシー', 'タチーテトー']);
   });
-  await ok('Kata yang sudah tampil dihindari selama ada alternatif; bila semua sudah tampil tetap ada hasil (bukan NO_WORDS)', () => {
+  await ok('Kata yang sudah tampil dihindari selama ada alternatif; bila semua sudah tampil hasilnya null (TIDAK diulang)', () => {
     const pools = S.segmentPools(mockJa, S.splitSegments(SENTS.slice(0, 3).join('\n')), 1);
     const used = WORDS.slice(0, 5); // 5 dari 6 kata sudah tampil
     for (let i = 0; i < 50; i++) assert.strictEqual(S.pickFromPools(pools, used).surface, WORDS[5]);
-    assert.ok(S.pickFromPools(pools, WORDS.slice(0, 6))); // semua sudah tampil -> dipakai ulang
+    assert.strictEqual(S.pickFromPools(pools, WORDS.slice(0, 6)), null); // semua sudah tampil -> tidak dipakai ulang
     assert.strictEqual(S.pickFromPools([], []), null);
   });
   await ok('Endpoint: 200 baris subtitle Jepang dalam satu interval -> kartu berhasil dibuat (dulu hanya 12 baris diterima)', () => {
@@ -409,15 +409,19 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
       assert.strictEqual(fetches.length, 1); assert.strictEqual(fetches[0].lines.length, 10); assert.strictEqual(fetches[0].lines[0].text, 'c0'); assert.strictEqual(fetches[0].lines.at(-1).text, 'c9');
       assert.strictEqual(playing, false, 'video dijeda saat popup'); assert.strictEqual(els.sheet.hidden, false);
       // NEXT memakai interval yang SAMA
+      assert.deepStrictEqual(fetches[0].exclude, []);
       els.next.onclick(); await new Promise((r) => setImmediate(r)); assert.deepStrictEqual(fetches[1].lines.map((l) => l.text), fetches[0].lines.map((l) => l.text));
+      assert.deepStrictEqual(fetches[1].exclude, ['カキー'], 'NEXT membawa riwayat interval yang sama');
       // 100 detik jam dinding berlalu saat popup terbuka: interval tidak maju
       for (let i = 0; i < 200; i++) tick(); assert.strictEqual(fetches.length, 2);
       // PLAY AGAIN -> jendela baru mulai dari posisi video sekarang
       els.again.onclick(); assert.strictEqual(playing, true);
       for (let i = 0; i < 59; i++) tick(); assert.strictEqual(fetches.length, 2); tick(); await new Promise((r) => setImmediate(r));
       assert.strictEqual(fetches.length, 3); assert.strictEqual(fetches[2].lines[0].text, 'c10'); assert.strictEqual(fetches[2].lines.at(-1).text, 'c19');
+      assert.deepStrictEqual(fetches[2].exclude, [], 'interval baru: riwayat interval sebelumnya tidak mencemari');
       // seek: loncat ke 150 dtk lalu tunggu satu interval penuh
       els.again.onclick(); T = 150; for (let i = 0; i < 59; i++) tick(); assert.strictEqual(fetches.length, 3, 'setelah seek, interval baru harus dihitung ulang dari posisi baru'); tick(); tick(); await new Promise((r) => setImmediate(r)); // tick pertama = deteksi seek
+      assert.deepStrictEqual(fetches[3].exclude, [], 'seek: riwayat dimulai dari awal');
       assert.strictEqual(fetches.length, 4); assert.ok(fetches[3].lines[0].text === 'c50' && ['c59', 'c60'].includes(fetches[3].lines.at(-1).text), fetches[3].lines.map((l) => l.text).join());
       // interval kosong -> pesan NO_WORDS lokal (tanpa memanggil server)
       els.again.onclick(); T = 280; run("subs = { cues: __cues.slice(0, 5), lang: 'ja' }"); for (let i = 0; i < 70; i++) tick(); await new Promise((r) => setImmediate(r));
@@ -426,6 +430,97 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
       run("subs = { cues: __cues, lang: 'ja' }"); els.again.onclick(); els.now.onclick(); await new Promise((r) => setImmediate(r));
       assert.strictEqual(fetches.length, 5);
   });
+
+
+  // =====================================================================
+  // PEMBARUAN: ekstraksi kandidat dari SELURUH subtitle + tanpa pengulangan per interval
+  // Penerjemah & kuromoji di sini TIRUAN (tabel kecil hanya sebagai data uji; kode aplikasi tidak memakai daftar kata apa pun).
+  // =====================================================================
+  const INT1 = ['SECTION CHIEF OJI AND CUTE THINGS', 'ALARM', 'Good morning, Pugtaro.'];
+  const INT2 = ['I am Oji Mitsutaka, 41 years old, divorced.', 'Are you awake, Uncle?', 'Good morning, Masumi.', 'Currently, my nephew Masumi is living with me.', 'I’ve finished making breakfast.', 'Thanks, I’ll be right out.', 'Okay.', 'There. Be good.'];
+  const flat = (lines, lang, n) => S.sourcePools(lines, lang, n).flat();
+  const phrases = (lines, lang, n, tier) => flat(lines, lang, n).filter((c) => !tier || c.tier === tier).map((c) => c.phrase);
+
+  await ok('Interval 1 (1 word): kandidat dari SELURUH subtitle, bukan hanya Kachou/Ohayou/Kawaii', () => {
+    const p = phrases(INT1, 'en', 1);
+    for (const w of ['section', 'chief', 'cute', 'things', 'alarm', 'good', 'morning', 'and']) assert.ok(p.includes(w), w);
+    assert.ok(!p.includes('pugtaro'), 'nama diri (kapital di tengah kalimat) bukan kosakata');
+    assert.deepStrictEqual(phrases(INT1, 'en', 1, 2), ['and'], 'kata fungsi tetap kandidat, tetapi prioritas terakhir');
+  });
+  await ok('Interval 2 (2 words): frasa bermakna dari seluruh subtitle (years old, good morning, making breakfast, right out)', () => {
+    const p = phrases(INT2, 'en', 2);
+    for (const w of ['years old', 'good morning', 'making breakfast', 'right out', 'finished making', 'my nephew']) assert.ok(p.includes(w), w);
+    assert.ok(phrases(INT2, 'en', 2, 1).length >= 5);
+    for (const bad of ['i am', 'there be', 'be good thanks', 'awake uncle', 'uncle masumi', 'oji mitsutaka', '41 years', 'with me', 'masumi is']) assert.ok(!p.includes(bad), 'tidak boleh: ' + bad);
+  });
+  await ok('Frasa tidak melintasi tanda baca/baris, tanpa angka, tanpa dua kata fungsi, tanpa duplikat antar-baris', () => {
+    for (const n of [2, 3]) for (const c of flat(INT2, 'en', n)) assert.ok(!/\d/.test(c.phrase) && c.phrase.split(' ').length === n);
+    const g = phrases(['Good morning.', 'Good morning, Masumi.'], 'en', 2); assert.deepStrictEqual(g, ['good morning']);
+    assert.strictEqual(S.foldKey('Things,', 'en'), S.foldKey('thing', 'en')); assert.strictEqual(S.foldKey('I’ve', 'en'), S.foldKey("i've", 'en'));
+    assert.strictEqual(S.foldKey('GOOD  morning!!', 'en'), 'good morning');
+  });
+  await ok('Bahasa tanpa spasi (Mandarin) dan Indonesia juga menghasilkan kandidat (algoritma umum, bukan khusus Inggris)', () => {
+    assert.ok(flat(['你好，世界'], 'zh', 1).length >= 2);
+    assert.ok(phrases(['Selamat pagi, Budi.', 'Saya sedang makan sarapan.'], 'id', 2).includes('selamat pagi'));
+  });
+
+  // penerjemah & kuromoji tiruan untuk uji endpoint
+  const DICT = { section: 'セクション', chief: 'チーフ', cute: 'かわいい', things: 'もの', alarm: 'アラーム', good: 'いい', morning: '朝', 'good morning': 'おはよう', and: 'と', oji: 'オジ', 'years old': '歳', 'making breakfast': '朝食作り', 'right out': 'すぐ出る', 'finished making': '作り終えた' };
+  const DREAD = { 朝: 'アサ', 歳: 'サイ', 朝食作り: 'チョウショクヅクリ', すぐ出る: 'スグデル', 作り終えた: 'ツクリオエタ', いい: 'イイ', もの: 'モノ', かわいい: 'カワイイ', と: 'ト', おはよう: 'オハヨウ' };
+  const jaTok = (text) => [{ surface_form: text, pos: '名詞', pos_detail_1: '一般', reading: DREAD[text] || (/^[\u30A0-\u30FF]+$/.test(text) ? '*' : undefined) }];
+  const dictFetch = (log = []) => async (url) => {
+    const u = String(url); const q = new URL(u).searchParams;
+    if (u.includes('translate.googleapis.com')) { log.push(q.get('tl') + ':' + q.get('q')); const tl = q.get('tl'); return resp(200, [[[tl === 'ja' ? (DICT[q.get('q')] || q.get('q')) : tl + '~' + q.get('q'), 'x']]]); }
+    return resp(500, {});
+  };
+  // menekan NEXT berkali-kali dengan riwayat interval yang dikelola seperti klien
+  async function nextAll(b, lines, wordCount, max = 40) {
+    const shownL = [], cards = []; let end = null;
+    for (let i = 0; i < max; i++) {
+      const r = (await post(b, { lines: lines.map((text) => ({ text })), sourceLang: 'en', wordCount, exclude: shownL })).body;
+      if (r.skipped) shownL.push(...r.skipped);
+      if (!r.ok && r.code === 'NOT_VERIFIED') continue; // putaran berisi kata tanpa padanan: klien menekan NEXT lagi (kandidat gagal sudah tercatat)
+      if (!r.ok) { end = r; break; }
+      shownL.push(r.surface, r.key); cards.push(r);
+    }
+    return { cards, end };
+  }
+  await ok('NEXT berkali-kali (interval 1, 1 word): tidak ada pengulangan, seluruh kandidat dipakai, lalu pesan "sudah habis"', () => withServer({ fetchImpl: dictFetch(), getTokenizer: async () => jaTok }, async (b) => {
+    const { cards, end } = await nextAll(b, INT1, 1);
+    const keys = cards.map((c) => c.key), surf = cards.map((c) => c.surface);
+    assert.strictEqual(new Set(keys).size, keys.length, 'sumber berulang: ' + keys); assert.strictEqual(new Set(surf).size, surf.length, 'Jepang berulang: ' + surf);
+    for (const k of ['section', 'chief', 'cute', 'thing', 'alarm', 'good', 'morning', 'and']) assert.ok(keys.includes(k), 'tidak pernah muncul: ' + k);
+    assert.strictEqual(end.code, 'NO_MORE_WORDS'); assert.strictEqual(end.message, 'You have seen all the words in this section. Press PLAY AGAIN to continue the video.');
+    assert.ok(cards.every((c) => c.viaTranslation === true && c.card.meaningEn && c.card.meaningId));
+    assert.ok(keys.indexOf('and') === keys.length - 1 || !keys.includes('and') || keys.indexOf('and') > keys.indexOf('alarm'), 'kata fungsi (tier 2) paling akhir');
+  }));
+  await ok('NEXT berkali-kali (interval 2, 2 words): variasi frasa, bukan satu frasa berulang', () => withServer({ fetchImpl: dictFetch(), getTokenizer: async () => jaTok }, async (b) => {
+    const { cards, end } = await nextAll(b, INT2, 2);
+    const keys = cards.map((c) => c.key);
+    assert.strictEqual(new Set(keys).size, keys.length); assert.ok(keys.length >= 4, 'terlalu sedikit variasi: ' + keys);
+    assert.ok(cards.every((c) => c.card.type === 'phrase')); for (const k of ['year old', 'good morning', 'making breakfast', 'right out']) assert.ok(keys.includes(k), k);
+    assert.strictEqual(end.code, 'NO_MORE_WORDS');
+  }));
+  await ok('Kandidat tanpa padanan terverifikasi dilewati (dicatat di skipped), tidak dikarang dan tidak diulang', () => withServer({ fetchImpl: dictFetch(), getTokenizer: async () => jaTok }, async (b) => {
+    const { cards, end } = await nextAll(b, ['Section chief Mitsutaka'], 1); // "mitsutaka" tidak ada di tabel: terjemahan mengembalikan teks Latin yang sama
+    const keys = cards.map((c) => c.key); assert.deepStrictEqual(keys.sort(), ['chief', 'section']);
+    assert.strictEqual(end.code, 'NO_MORE_WORDS');
+  }));
+  await ok('Interval berbeda = kumpulan kandidat & riwayat berbeda (server tanpa status; riwayat interval lain tidak mencemari)', async () => {
+    const a = await withServer({ fetchImpl: dictFetch(), getTokenizer: async () => jaTok }, (b) => nextAll(b, INT1, 1)); // server terpisah: batas 12 sorotan/menit per pengunjung
+    const c = await withServer({ fetchImpl: dictFetch(), getTokenizer: async () => jaTok }, (b) => nextAll(b, INT2, 1));
+    assert.ok(a.cards.some((x) => x.key === 'good') && c.cards.some((x) => x.key === 'good') && c.cards.some((x) => x.key === 'morning'), 'good tetap muncul di interval 2 walau sudah tampil di interval 1 (tabel tiruan hanya memuat sebagian kata)');
+  });
+  await ok('Layanan terjemahan mati total: pesan sopan (bukan "kata habis"), riwayat tidak tercemar', () => withServer({ fetchImpl: async () => resp(500, {}), getTokenizer: async () => jaTok }, async (b) => {
+    const r = await post(b, { lines: INT1.map((text) => ({ text })), sourceLang: 'en', wordCount: 1, exclude: [] });
+    assert.strictEqual(r.status, 502); assert.strictEqual(r.body.code, 'TRANSLATE_FAIL');
+  }));
+  await ok('Subtitle Jepang: kata yang sudah tampil tidak diulang; setelah habis -> pesan "sudah habis"', () => withServer({ fetchImpl: fake(), getTokenizer: fakeTok() }, async (b) => {
+    const shownL = [], got = [];
+    for (let i = 0; i < 3; i++) { const r = (await post(b, GOOD({ wordCount: 1, exclude: shownL }))).body; assert.strictEqual(r.ok, true); shownL.push(r.surface); got.push(r.surface); }
+    assert.deepStrictEqual(got.sort(), ['かわいい', '好き', '猫'].sort());
+    const end = (await post(b, GOOD({ wordCount: 1, exclude: shownL }))).body; assert.strictEqual(end.code, 'NO_MORE_WORDS'); assert.ok(end.message.includes('all the words'));
+  }));
 
   console.log('\n' + passed + ' tes lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ', semua aman'));
 })();
