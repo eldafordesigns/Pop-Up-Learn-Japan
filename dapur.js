@@ -11,25 +11,30 @@ const path = require('path');
 const PORT = process.env.PORT || 3000;
 const SUB_LIMIT = 20; // subtitle per menit per pengunjung
 const HL_LIMIT = 12;  // sorotan kata per menit per pengunjung
+const HL_MAX_LINES = 3000;   // semua cue dalam satu interval (interval maksimum 60 menit) boleh dikirim
+const HL_MAX_CHARS = 60000;  // total huruf yang dianalisis per permintaan; di atas ini cue dipilih merata dari seluruh interval
+const HL_BODY_MAX = 700000;  // batas ukuran badan permintaan /api/highlight (byte)
+const TR_ENC_MAX = 3500;     // panjang maksimum satu potongan teks (setelah di-encode URL) untuk layanan terjemahan GET
+const TR_MAX_CHUNKS = 6;     // jumlah potongan terjemahan maksimum per sorotan; bila lebih, potongan dipilih merata
 const YT_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be', 'music.youtube.com']);
 
 const MSG = {
-  BAD_LINK: 'Link tidak valid. Tempel link video yang lengkap.',
-  UNSUPPORTED_SITE: 'Situs ini belum didukung. Saat ini hanya YouTube.',
-  NO_SUBTITLE: 'Video ini tidak punya subtitle. Silakan cari video lain.',
-  RATE_LIMIT: 'Terlalu banyak permintaan. Tunggu satu menit lalu coba lagi.',
-  UPSTREAM: 'Gagal mengambil subtitle dari YouTube. Coba lagi nanti, pilih video lain, atau tempel subtitle manual.',
-  BAD_INPUT: 'Data yang dikirim tidak lengkap atau tidak valid.',
-  NO_WORDS: 'Tidak ada kata yang cocok di bagian ini. Tekan NEXT untuk mencoba lagi.',
-  TRANSLATE_FAIL: 'Layanan terjemahan sedang sibuk. Tekan NEXT untuk mencoba lagi.',
-  BOT_BLOCK: 'YouTube menolak memberi subtitle ke server ini (server dianggap bot). Pakai "Tempel manual" di bawah: unggah atau tempel file subtitle .srt/.vtt.',
-  QUOTA: 'Kuota layanan subtitle bulan ini habis. Pakai "Tempel manual" di bawah, atau coba lagi bulan depan.',
-  NO_TOKENIZER: 'Mesin pemecah kata Jepang belum siap. Tunggu sebentar lalu coba lagi.',
-  IS_YOUTUBE: 'Link YouTube memakai jalur subtitle YouTube, bukan jalur halaman sumber.',
-  PAGE_BLOCKED: 'Situs sumber menolak permintaan otomatis (butuh login, verifikasi, atau pembatasan lain). Aplikasi tidak mencoba menembusnya. Pakai "Tempel manual" di bawah.',
-  PAGE_FAIL: 'Server tidak bisa membuka halaman sumber video. Periksa link-nya, atau pakai "Tempel manual" di bawah.',
-  NO_TRACKS: 'Tidak ada subtitle publik yang bisa dibaca dari halaman ini. Pada banyak situs subtitle dimuat oleh pemutar lewat JavaScript atau memakai token, sehingga tidak bisa diambil otomatis. Pakai "Tempel manual" di bawah.',
-  TRACK_FAIL: 'Subtitle ditemukan, tetapi file-nya tidak bisa diunduh atau dibaca (formatnya belum didukung atau dilindungi). Pakai "Tempel manual" di bawah.',
+  BAD_LINK: 'Invalid link. Paste the full video link.',
+  UNSUPPORTED_SITE: 'This site is not supported yet. Only YouTube is supported at the moment.',
+  NO_SUBTITLE: 'This video has no subtitles. Please find another video.',
+  RATE_LIMIT: 'Too many requests. Wait one minute and try again.',
+  UPSTREAM: 'Failed to retrieve subtitles from YouTube. Try again later, choose another video, or paste the subtitles manually.',
+  BAD_INPUT: 'The data sent is incomplete or invalid.',
+  NO_WORDS: 'No matching words found in this section. Press PLAY AGAIN to continue the video.',
+  TRANSLATE_FAIL: 'The translation service is busy. Press NEXT to try again.',
+  BOT_BLOCK: 'YouTube refused to provide subtitles to this server (the server was treated as a bot). Use "Paste manually" below: upload or paste a .srt/.vtt subtitle file.',
+  QUOTA: 'This month\'s subtitle service quota has been used up. Use "Paste manually" below, or try again next month.',
+  NO_TOKENIZER: 'The Japanese word-splitting engine is not ready yet. Wait a moment and try again.',
+  IS_YOUTUBE: 'YouTube links use the YouTube subtitle route, not the source-page route.',
+  PAGE_BLOCKED: 'The source site refused the automated request (login, verification, or another restriction is required). The app does not try to bypass it. Use "Paste manually" below.',
+  PAGE_FAIL: 'The server could not open the video source page. Check the link, or use "Paste manually" below.',
+  NO_TRACKS: 'No public subtitles could be read from this page. On many sites the subtitles are loaded by the player through JavaScript or use tokens, so they cannot be retrieved automatically. Use "Paste manually" below.',
+  TRACK_FAIL: 'Subtitles were found, but the file could not be downloaded or read (unsupported or protected format). Use "Paste manually" below.',
 };
 
 // ---------- Subtitle ----------
@@ -551,14 +556,62 @@ function buildCard(ai, wordCount) {
   return card;
 }
 
+// Bila total huruf melebihi batas, ambil baris secara merata dari awal sampai akhir interval (urutan tetap), bukan hanya awal/akhir.
+function sampleEvenly(lines, maxChars) {
+  const total = lines.reduce((a, l) => a + l.length, 0);
+  if (total <= maxChars) return lines;
+  const k = Math.max(1, Math.floor(lines.length * maxChars / total));
+  return Array.from({ length: k }, (_, i) => lines[Math.floor(i * lines.length / k)]);
+}
+
 function cleanInput(b) {
-  if (!b || typeof b !== 'object' || !Array.isArray(b.lines) || b.lines.length < 1 || b.lines.length > 12) return { error: true };
-  const lines = b.lines.map((l) => cleanText(l && l.text).slice(0, 200)).filter(Boolean);
+  if (!b || typeof b !== 'object' || !Array.isArray(b.lines) || b.lines.length < 1 || b.lines.length > HL_MAX_LINES) return { error: true };
+  const lines = sampleEvenly(b.lines.map((l) => cleanText(l && l.text)).filter(Boolean), HL_MAX_CHARS); // cleanText membatasi tiap baris 500 huruf
   const lang = String(b.sourceLang || '');
   if (!lines.length || !/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$/.test(lang)) return { error: true };
   const wordCount = Math.min(3, Math.max(1, Math.round(Number(b.wordCount) || 1)));
   const exclude = (Array.isArray(b.exclude) ? b.exclude : []).slice(0, 50).map((x) => cleanText(x).slice(0, 40)).filter(Boolean);
   return { lines, lang, wordCount, exclude };
+}
+
+// ---------- Memilih kata dari SELURUH teks interval ----------
+// 1) teks dipecah per kalimat/baris (kata gabungan tidak boleh melintasi batas kalimat),
+// 2) tiap kalimat dipecah kata dengan kuromoji (bukan pemisahan spasi),
+// 3) kalimat dipilih acak lebih dulu, baru kata di dalamnya: hasil tersebar di seluruh interval, bukan hanya awal/akhir.
+const SENTENCE_BREAK = /[\n。！？!?]+/;
+function splitSegments(text) { return String(text).split(SENTENCE_BREAK).map((x) => x.trim()).filter(Boolean); }
+
+function segmentPools(tokenize, segments, n) {
+  const pools = [];
+  for (const seg of segments) {
+    let tokens; try { tokens = tokenize(seg) || []; } catch { continue; }
+    const pool = candidates(tokens, n, []).filter((c) => partsOf(c.w).every((p) => p.reading && p.romaji)); // kartu harus bisa dibentuk
+    if (pool.length) pools.push(pool);
+  }
+  return pools;
+}
+
+// Kata yang sudah tampil dihindari selama masih ada alternatif; baru dipakai ulang bila tidak ada kata lain sama sekali.
+function pickFromPools(pools, exclude = [], rand = Math.random) {
+  const skip = new Set(exclude);
+  const fresh = pools.map((p) => p.filter((c) => !skip.has(c.surface))).filter((p) => p.length);
+  const from = fresh.length ? fresh : pools;
+  if (!from.length) return null;
+  const seg = from[Math.floor(rand() * from.length)];
+  return seg[Math.floor(rand() * seg.length)];
+}
+
+// Teks non-Jepang diterjemahkan per potongan (URL layanan terjemahan ada batas panjangnya).
+function translationChunks(lines, encMax = TR_ENC_MAX, maxChunks = TR_MAX_CHUNKS) {
+  const chunks = []; let cur = [], len = 0;
+  for (const l of lines) {
+    const e = encodeURIComponent(l).length + 3;
+    if (cur.length && len + e > encMax) { chunks.push(cur.join('\n')); cur = []; len = 0; }
+    cur.push(l); len += e;
+  }
+  if (cur.length) chunks.push(cur.join('\n'));
+  if (chunks.length <= maxChunks) return chunks;
+  return Array.from({ length: maxChunks }, (_, i) => chunks[Math.floor(i * chunks.length / maxChunks)]); // merata dari awal sampai akhir interval
 }
 
 function readBody(req, max = 20000) {
@@ -625,7 +678,7 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
       const tooMany = (bucket, max) => { const k = bucket + ':' + ip; const n = (hits.get(k) || 0) + 1; hits.set(k, n); return n > max; };
 
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-        let html; try { html = fs.readFileSync(indexPath); } catch { return send(404, { ok: false, message: 'Halaman belum ada.' }); }
+        let html; try { html = fs.readFileSync(indexPath); } catch { return send(404, { ok: false, message: 'Page not found.' }); }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP, 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Cache-Control': 'no-cache' });
         return res.end(html);
       }
@@ -658,19 +711,22 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
         if (tooMany('hl', HL_LIMIT)) return fail(429, 'RATE_LIMIT');
         if (!/^application\/json/i.test(req.headers['content-type'] || '')) return send(415, { ok: false, code: 'BAD_INPUT', message: MSG.BAD_INPUT });
         let raw;
-        try { raw = await readBody(req); } catch { res.setHeader('Connection', 'close'); return send(413, { ok: false, code: 'BAD_INPUT', message: MSG.BAD_INPUT }); }
+        try { raw = await readBody(req, HL_BODY_MAX); } catch { res.setHeader('Connection', 'close'); return send(413, { ok: false, code: 'BAD_INPUT', message: MSG.BAD_INPUT }); }
         let body; try { body = JSON.parse(raw); } catch { return fail(400, 'BAD_INPUT'); }
         const inp = cleanInput(body);
         if (inp.error) return fail(400, 'BAD_INPUT');
 
         let tokenize; try { tokenize = await getTokenizer(); } catch { return fail(503, 'NO_TOKENIZER'); }
         let japanese = inp.lines.join('\n'), viaTranslation = false;
-        if (inp.lang !== 'ja' && !inp.lang.startsWith('ja-')) { // bukan Jepang: terjemahkan dulu ke Jepang
-          try { japanese = await translate(fetchImpl, cache, japanese, inp.lang.split('-')[0], 'ja'); viaTranslation = true; } catch { return fail(502, 'TRANSLATE_FAIL'); }
+        if (inp.lang !== 'ja' && !inp.lang.startsWith('ja-')) { // bukan Jepang: terjemahkan dulu ke Jepang (per potongan, paralel)
+          const sl = inp.lang.split('-')[0];
+          const done = (await Promise.allSettled(translationChunks(inp.lines).map((c) => translate(fetchImpl, cache, c, sl, 'ja')))).filter((r) => r.status === 'fulfilled').map((r) => r.value);
+          if (!done.length) return fail(502, 'TRANSLATE_FAIL');
+          japanese = done.join('\n'); viaTranslation = true;
         }
-        const pool = candidates(tokenize(japanese), inp.wordCount, inp.exclude);
-        if (!pool.length) return fail(200, 'NO_WORDS');
-        const pick = pool[Math.floor(Math.random() * pool.length)];
+        const pools = segmentPools(tokenize, splitSegments(japanese), inp.wordCount);
+        const pick = pickFromPools(pools, inp.exclude);
+        if (!pick) return fail(200, 'NO_WORDS');
         let id, en;
         try { [id, en] = await Promise.all([translate(fetchImpl, cache, pick.surface, 'ja', 'id'), translate(fetchImpl, cache, pick.surface, 'ja', 'en')]); } catch { return fail(502, 'TRANSLATE_FAIL'); }
         const parts = partsOf(pick.w);
@@ -678,14 +734,14 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
         return card ? send(200, { ok: true, card, surface: pick.surface, viaTranslation }) : fail(502, 'NO_WORDS');
       }
 
-      return send(['GET', 'POST'].includes(req.method) ? 404 : 405, { ok: false, message: 'Tidak ditemukan.' });
+      return send(['GET', 'POST'].includes(req.method) ? 404 : 405, { ok: false, message: 'Not found.' });
     } catch {
-      return send(500, { ok: false, message: 'Terjadi kesalahan di dapur.' });
+      return send(500, { ok: false, message: 'Something went wrong on the server.' });
     }
   });
 }
 
-module.exports = { fetchPageSubtitles, scanTracks, scanFrames, rankCandidates, langOf, isPrivateIp, assertPublicUrl, createServer, fetchViaSupadata, parseXml, parseVtt, parseCaption, extractPlayerResponse, orderTracks, fetchSubtitles, extractVideoId, parseJson3, pickTrack, captionUrl, cleanText, buildCard, cleanInput, toRomaji, toHiragana, candidates, partsOf };
+module.exports = { fetchPageSubtitles, scanTracks, scanFrames, rankCandidates, langOf, isPrivateIp, assertPublicUrl, createServer, fetchViaSupadata, parseXml, parseVtt, parseCaption, extractPlayerResponse, orderTracks, fetchSubtitles, extractVideoId, parseJson3, pickTrack, captionUrl, cleanText, buildCard, cleanInput, toRomaji, toHiragana, candidates, partsOf, splitSegments, segmentPools, pickFromPools, translationChunks, sampleEvenly };
 
 if (require.main === module) {
   createServer().listen(PORT, () => {
