@@ -83,7 +83,8 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
   });
   await ok('Masukan dibatasi', () => {
     assert.ok(cleanInput({ lines: [], sourceLang: 'id' }).error);
-    assert.ok(cleanInput({ lines: Array(13).fill({ text: 'a' }), sourceLang: 'id' }).error);
+    assert.ok(cleanInput({ lines: Array(3001).fill({ text: 'a' }), sourceLang: 'id' }).error); // batas baru: 3000 baris (seluruh interval)
+    assert.ok(!cleanInput({ lines: Array(500).fill({ text: 'a' }), sourceLang: 'id' }).error); // dulu ditolak (>12 baris)
     assert.ok(cleanInput({ lines: [{ text: 'a' }], sourceLang: 'id; DROP' }).error);
     assert.strictEqual(cleanInput({ lines: [{ text: 'a' }], sourceLang: 'id', wordCount: 99 }).wordCount, 3);
   });
@@ -91,7 +92,7 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
   // ---- endpoint ----
   await ok('Subtitle Korea saja tetap diterima; tanpa subtitle muncul pemberitahuan', async () => {
     await withServer({ fetchImpl: fake({ tracks: [T('ko')] }) }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.language, 'ko'); assert.strictEqual(r.body.title, 'Tes Video'); });
-    await withServer({ fetchImpl: fake({ tracks: [] }) }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.code, 'NO_SUBTITLE'); assert.ok(r.body.message.includes('cari video lain')); });
+    await withServer({ fetchImpl: fake({ tracks: [] }) }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.code, 'NO_SUBTITLE'); assert.ok(r.body.message.includes('find another video')); });
   });
   await ok('Subtitle Jepang: tidak diterjemahkan ke Jepang, arti Indonesia & Inggris dari Google', () => {
     const seen = [];
@@ -122,14 +123,14 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
   await ok('Masukan buruk ditolak: bukan JSON, tipe salah, terlalu besar', () => withServer({ fetchImpl: fake(), getTokenizer: fakeTok() }, async (b) => {
     assert.strictEqual((await post(b, null, { 'Content-Type': 'application/json' }, '{rusak')).status, 400);
     assert.strictEqual((await post(b, GOOD(), { 'Content-Type': 'text/plain' })).status, 415);
-    assert.strictEqual((await post(b, null, { 'Content-Type': 'application/json' }, JSON.stringify({ lines: [{ text: 'x'.repeat(30000) }], sourceLang: 'id' }))).status, 413);
+    assert.strictEqual((await post(b, null, { 'Content-Type': 'application/json' }, JSON.stringify({ lines: [{ text: 'x'.repeat(800000) }], sourceLang: 'id' }))).status, 413);
   }));
   await ok('Pembatas: permintaan sorotan ke-13 per menit ditolak', () => withServer({ fetchImpl: fake(), getTokenizer: fakeTok() }, async (b) => {
     let last; for (let i = 0; i < 13; i++) last = await post(b, GOOD()); assert.strictEqual(last.status, 429);
   }));
   await ok('Halaman aplikasi disajikan dengan header keamanan; metode/alamat asing ditolak', () => withServer({ fetchImpl: fake() }, async (b) => {
     const r = await fetch(b + '/');
-    assert.strictEqual(r.status, 200); assert.ok((await r.text()).includes('Belajar Jepang'));
+    assert.strictEqual(r.status, 200); assert.ok((await r.text()).includes('Learn Japanese'));
     assert.ok(r.headers.get('content-security-policy').includes("default-src 'self'")); assert.strictEqual(r.headers.get('x-frame-options'), 'DENY');
     assert.strictEqual((await fetch(b + '/server.js')).status, 404); assert.strictEqual((await fetch(b + '/../package.json')).status, 404);
     assert.strictEqual((await fetch(b + '/api/subtitles', { method: 'DELETE' })).status, 405);
@@ -165,7 +166,7 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
   });
   await ok('Diblokir bot / subtitle ditolak: pesan jelas + jejak singkat tanpa rahasia', async () => {
     const bot = async (url) => String(url).includes('/youtubei/v1/player') ? resp(200, { playabilityStatus: { status: 'LOGIN_REQUIRED', reason: 'Sign in to confirm you’re not a bot' } }) : txtResp(200, '');
-    await withServer({ fetchImpl: bot }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.code, 'BOT_BLOCK'); assert.ok(r.body.message.includes('Tempel manual')); });
+    await withServer({ fetchImpl: bot }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.code, 'BOT_BLOCK'); assert.ok(r.body.message.includes('Paste manually')); });
     const denied = async (url) => String(url).includes('/youtubei/v1/player') ? resp(200, { captions: { playerCaptionsTracklistRenderer: { captionTracks: [T('en')] } } }) : txtResp(200, '');
     await withServer({ fetchImpl: denied }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.code, 'BOT_BLOCK'); assert.ok(r.body.trace.includes('kosong')); });
   });
@@ -249,6 +250,181 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
       for (let i = 0; i < 12; i++) r = await q('https://site.test/watch/x?ep=5');
       assert.strictEqual(r.body.code, 'RATE_LIMIT');
     });
+  });
+
+
+  // =====================================================================
+  // PEMBARUAN: algoritma sorotan (seluruh interval) + antarmuka bahasa Inggris
+  // CATATAN: tokenizer di sini adalah TIRUAN (kuromoji tidak terpasang di lingkungan ini); jam & pemutar video juga SIMULASI.
+  // =====================================================================
+  const vm = require('vm'), fsx = require('fs'), pathx = require('path');
+  const PARTICLES = ['と', 'を', '見ました'];
+  const kataOf = (x) => x.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60));
+  // TIRUAN kuromoji: memecah pada spasi, partikel, dan tanda baca; sisanya dianggap kata benda.
+  const mockJa = (text) => text.split(/(\s+|と|を|見ました|。)/).filter((w) => w && w.trim()).map((w) => w === '。' ? tok(w, '記号', '句点', w) : PARTICLES.includes(w) ? tok(w, '助詞', '格助詞', kataOf(w)) : tok(w, '名詞', '一般', kataOf(w)));
+  const KANA3 = 'カキクケコサシスセソタチツテト';
+  const WORDS = []; for (let i = 0; i < 14 && WORDS.length < 80; i++) for (let j = 0; j < 14 && WORDS.length < 80; j++) if (i !== j) WORDS.push(KANA3[i] + KANA3[j] + 'ー'); // 80 kata unik
+  const SENTS = Array.from({ length: 40 }, (_, i) => `${WORDS[2 * i]}と${WORDS[2 * i + 1]}を見ました。`);
+  const rng = (a) => () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+
+  await ok('Seluruh teks interval dipakai: 40 kalimat -> semua 80 kata bisa terpilih, tersebar merata awal-tengah-akhir', () => {
+    const pools = S.segmentPools(mockJa, S.splitSegments(SENTS.join('\n')), 1);
+    assert.strictEqual(pools.length, 40);
+    const r = rng(7), count = new Map(), quart = [0, 0, 0, 0], N = 4000;
+    for (let i = 0; i < N; i++) { const c = S.pickFromPools(pools, [], r); count.set(c.surface, (count.get(c.surface) || 0) + 1); quart[Math.min(3, Math.floor(WORDS.indexOf(c.surface) / 20))]++; }
+    assert.strictEqual(count.size, 80); // tidak ada kata/kalimat yang tidak pernah terpilih
+    quart.forEach((q) => assert.ok(q / N > 0.2 && q / N < 0.3, 'kuartil tidak merata: ' + quart.join(',')));
+  });
+  await ok('Kata gabungan (2 kata) tidak melintasi batas kalimat/baris', () => {
+    const lines = ['カキー サシー', 'タチー テトー']; // tanpa tanda baca antar-baris
+    const pools = S.segmentPools(mockJa, S.splitSegments(lines.join('\n')), 2);
+    const all = pools.flat().map((c) => c.surface).sort();
+    assert.deepStrictEqual(all, ['カキーサシー', 'タチーテトー']);
+  });
+  await ok('Kata yang sudah tampil dihindari selama ada alternatif; bila semua sudah tampil tetap ada hasil (bukan NO_WORDS)', () => {
+    const pools = S.segmentPools(mockJa, S.splitSegments(SENTS.slice(0, 3).join('\n')), 1);
+    const used = WORDS.slice(0, 5); // 5 dari 6 kata sudah tampil
+    for (let i = 0; i < 50; i++) assert.strictEqual(S.pickFromPools(pools, used).surface, WORDS[5]);
+    assert.ok(S.pickFromPools(pools, WORDS.slice(0, 6))); // semua sudah tampil -> dipakai ulang
+    assert.strictEqual(S.pickFromPools([], []), null);
+  });
+  await ok('Endpoint: 200 baris subtitle Jepang dalam satu interval -> kartu berhasil dibuat (dulu hanya 12 baris diterima)', () => {
+    const lines = Array.from({ length: 200 }, (_, i) => ({ text: SENTS[i % 40] }));
+    return withServer({ fetchImpl: fake(), getTokenizer: async () => mockJa }, async (b) => {
+      const r = await post(b, { lines, sourceLang: 'ja', wordCount: 1 });
+      assert.strictEqual(r.body.ok, true); assert.ok(WORDS.includes(r.body.surface), r.body.surface);
+    });
+  });
+  await ok('Pesan "tidak ada kata" persis sesuai permintaan, hanya muncul bila memang tidak ada kata', () => withServer({ fetchImpl: fake(), getTokenizer: fakeTok([tok('を', '助詞', '格助詞', 'ヲ')]) }, async (b) => {
+    const r = await post(b, GOOD()); assert.strictEqual(r.body.code, 'NO_WORDS');
+    assert.strictEqual(r.body.message, 'No matching words found in this section. Press PLAY AGAIN to continue the video.');
+  }));
+  await ok('Subtitle non-Jepang panjang: diterjemahkan per potongan (maks. 6), potongan merata dari seluruh interval; sebagian gagal tetap jalan', async () => {
+    const lines = Array.from({ length: 600 }, (_, i) => 'kalimat nomor ' + i + ' dalam subtitle yang cukup panjang untuk uji'); // ~ 27.000 huruf
+    const chunks = S.translationChunks(lines.map((x) => x)); assert.ok(chunks.length <= 6 && chunks.length >= 2);
+    assert.ok(chunks[0].includes('nomor 0 ') && chunks.at(-1).includes('nomor 5'), 'potongan harus mencakup awal sampai akhir');
+    assert.ok(chunks.every((c) => encodeURIComponent(c).length < 4500));
+    let calls = 0, seenQ = [];
+    const f = async (url) => { const u = String(url); if (u.includes('translate.googleapis.com')) { const q = new URL(u).searchParams; if (q.get('tl') === 'ja') { calls++; seenQ.push(q.get('q')); if (calls === 2) return resp(500, {}); return resp(200, [[['かわいい猫が好き', 'x']]]); } return resp(200, [[[q.get('tl') === 'id' ? 'kucing lucu' : 'cute cat', 'x']]]); } return resp(500, {}); };
+    await withServer({ fetchImpl: f, getTokenizer: fakeTok() }, async (b) => {
+      const r = await post(b, { lines: lines.map((text) => ({ text })), sourceLang: 'id', wordCount: 1 });
+      assert.strictEqual(r.body.ok, true); assert.strictEqual(r.body.viaTranslation, true);
+    });
+    assert.ok(calls >= 2 && calls <= 12); // (1 potongan gagal di Google lalu cadangan MyMemory dicoba; hasil akhir tetap ada)
+  });
+  await ok('Batas input: banyak baris diambil merata (awal dan akhir interval tetap terwakili)', () => {
+    const lines = Array.from({ length: 1000 }, (_, i) => ({ text: ('n' + i + ' ').padEnd(200, 'x') })); // 200.000 huruf > batas 60.000
+    const c = cleanInput({ lines, sourceLang: 'ja' });
+    assert.ok(c.lines.length >= 280 && c.lines.length <= 300); assert.ok(c.lines[0].startsWith('n0 ')); assert.ok(Number(c.lines.at(-1).match(/^n(\d+)/)[1]) > 900);
+  });
+
+  // ---- logika interval di index.html (blok WINDOW-LOGIC dimuat langsung dari file; pemutar & jam disimulasikan) ----
+  const html = fsx.readFileSync(pathx.join(__dirname, 'index.html'), 'utf8');
+  const block = html.split('/* WINDOW-LOGIC-START')[1].split('/* WINDOW-LOGIC-END */')[0];
+  const W = vm.runInNewContext(block.slice(block.indexOf('*/') + 2) + '; ({ cuesIn, capLines, manualWindow, stepTimer, intervalSeconds })', {});
+  const cues = Array.from({ length: 200 }, (_, i) => ({ start: i * 3, end: i * 3 + 2.5, text: 'baris ' + i })); // 1 cue tiap 3 detik, 10 menit
+  // pemutar simulasi: langkah 0,5 dtk seperti setInterval di halaman; popup = video dijeda, lalu PLAY AGAIN memulai jendela baru
+  function sim({ I = 30, steps = 400, events = {}, popupSteps = 60 }) {
+    const tm = { winStart: 0, lastT: null, lastWall: 0 }, fires = [], log = [];
+    let t = 0, wall = 0, playing = true, sheet = 0;
+    W.stepTimer(tm, 0, 0, I); // tick pertama halaman terjadi saat video masih di 0:00
+    for (let i = 0; i < steps; i++) {
+      wall += 0.5; const ev = events[i]; if (ev) { if (ev.seek != null) t = ev.seek; if (ev.pause) playing = false; if (ev.play) playing = true; if (ev.wallJump) wall += ev.wallJump; if (ev.tJump) t += ev.tJump; if (ev.tJitter) t += ev.tJitter; }
+      if (playing && !sheet) t += 0.5;
+      const act = W.stepTimer(tm, t, wall, I); if (act === 'seek') log.push({ step: i, seek: t });
+      if (sheet) { if (--sheet === 0) { tm.winStart = t; tm.lastT = t; tm.lastWall = wall; playing = true; } continue; } // PLAY AGAIN
+      if (act === 'fire') { fires.push({ from: tm.winStart, to: tm.winStart + I, at: t, lines: W.cuesIn(cues, tm.winStart, tm.winStart + I) }); sheet = popupSteps; playing = false; }
+    }
+    return { fires, log };
+  }
+  await ok('Interval 30 dtk: tiap sorotan mengumpulkan SEMUA cue dalam rentangnya (0-30, 30-60, 60-90 ...)', () => {
+    const { fires } = sim({ I: 30, steps: 400 });
+    assert.deepStrictEqual(fires.slice(0, 3).map((f) => [f.from, f.to]), [[0, 30], [30, 60], [60, 90]]);
+    fires.slice(0, 3).forEach((f) => { const expect = cues.filter((c) => c.end > f.from && c.start < f.to).length; assert.strictEqual(f.lines.length, expect); assert.ok(f.lines.length >= 10); });
+  });
+  await ok('Video dijeda (manual atau karena popup) -> interval berhenti; lanjut dari waktu video, bukan jam dinding', () => {
+    const r = sim({ I: 30, steps: 700, events: { 20: { pause: true }, 420: { play: true } } }); // pause di t=10 selama 200 dtk jam dinding
+    assert.deepStrictEqual([r.fires[0].from, r.fires[0].at], [0, 30]); // sorotan pertama tetap di waktu video 30, bukan lebih awal
+    assert.ok(r.fires[0].at > 30 - 0.01 && r.fires[0].lines.length > 0);
+    const r2 = sim({ I: 30, steps: 400, popupSteps: 400 }); assert.strictEqual(r2.fires.length, 1); // popup terbuka lama: tidak ada sorotan baru
+  });
+  await ok('Seek maju/mundur: interval dihitung ulang dari posisi baru dan mengambil cue dari rentang yang benar', () => {
+    const f = sim({ I: 30, steps: 400, events: { 24: { seek: 500 } } }); // t=12 -> loncat ke 500
+    assert.ok(f.log.some((x) => x.seek >= 500)); assert.deepStrictEqual([f.fires[0].from, f.fires[0].to], [500.5, 530.5].map((x) => f.fires[0].from === 500 ? Math.floor(x) : x));
+    assert.ok(f.fires[0].lines.every((l) => { const n = Number(l.text.split(' ')[1]); return n * 3 + 2.5 > 500 && n * 3 < 530.5; }));
+    const b = sim({ I: 30, steps: 400, events: { 50: { seek: 5 } } }); // t=25 -> mundur ke 5
+    assert.ok(b.log.length === 1 && b.fires[0].from > 5 - 1 && b.fires[0].from < 6 && b.fires[0].at > 34);
+  });
+  await ok('Koreksi jam kecil dan tab latar (timer diperlambat) BUKAN seek; lompatan nyata adalah seek', () => {
+    assert.strictEqual(sim({ steps: 100, events: { 10: { tJitter: -0.4 } } }).log.length, 0); // jam pemutar iframe sedikit mundur
+    assert.strictEqual(sim({ I: 600, steps: 3, events: { 2: { wallJump: 60, tJump: 60 } } }).log.length, 0); // tab latar: 60 dtk jam = 60 dtk video
+    assert.strictEqual(sim({ steps: 100, events: { 10: { tJump: 40 } } }).log.length, 1);
+  });
+  await ok('Tombol ✨: interval terakhir sebelum posisi video; kosong -> interval berikutnya; batas baris merata', () => {
+    const J = (x) => JSON.parse(JSON.stringify(x));
+    assert.deepStrictEqual(J(W.manualWindow(cues, 100, 60)), { from: 40, to: 100 });
+    assert.deepStrictEqual(J(W.manualWindow(cues.slice(5), 10, 60)), { from: 10, to: 70 }); // belum ada cue sebelum t -> lihat ke depan
+    const big = Array.from({ length: 5000 }, (_, i) => ({ text: 'baris ' + i })), c = W.capLines(big, 3000, 60000);
+    assert.ok(c.length <= 3000 && c[0].text === 'baris 0' && Number(c.at(-1).text.split(' ')[1]) > 4500);
+    assert.strictEqual(W.cuesIn([{ start: 1, end: 2, text: 'a' }, { start: 2, end: 3, text: 'a' }, { start: 3, end: 4, text: 'b' }], 0, 10).length, 2); // baris kembar berurutan digabung
+  });
+
+  // ---- antarmuka: tidak boleh ada teks Indonesia yang tertinggal (pemeriksaan heuristik, bukan bukti mutlak) ----
+  await ok('Antarmuka (index.html) dan pesan server (dapur.js) tidak lagi memakai kata-kata Indonesia', () => {
+    const ID = /\b(tidak|yang|dengan|untuk|belum|tekan|pilih|muat|jeda|putar|kata|baris|gagal|bahasa|halaman|situs|tempel|mencari|mengambil|berhasil|periksa|coba|lagi|atau|dari|pada|sudah|akan|bisa|sumber|jepang|inggris|pemutar|subtitle tidak|terjemahan|silakan|terlalu|tunggu)\b/i;
+    const stripJs = (x) => x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '').replace(/[ \t]\/\/[ \t].*$/gm, '');
+    const rawScript = html.match(/<script>([\s\S]*?)<\/script>/)[1], script = stripJs(rawScript);
+    const noJs = html.replace(/<script>[\s\S]*?<\/script>|<style>[\s\S]*?<\/style>|<!--[\s\S]*?-->/g, '');
+    const visible = noJs.replace(/<[^>]+>/g, ' ');
+    const attrs = (noJs.match(/(?:aria-label|placeholder|title|alt)="[^"]*"/g) || []).join(' ');
+    const lits = (script.match(/'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g) || []).join('\n');
+    for (const [name, text] of [['HTML', visible], ['atribut', attrs], ['string JS', lits]]) { const m = text.match(ID); assert.ok(!m, name + ' masih ada kata Indonesia: ' + (m && m[0])); }
+    const srv = stripJs(fsx.readFileSync(pathx.join(__dirname, 'dapur.js'), 'utf8')), msg = srv.slice(srv.indexOf('const MSG = {'), srv.indexOf('};', srv.indexOf('const MSG = {')));
+    assert.ok(!ID.test(msg), 'MSG server masih ada kata Indonesia: ' + (msg.match(ID) || [])[0]);
+    assert.ok(html.includes('<html lang="en">') && html.includes('<title>Learn Japanese from Videos</title>'));
+  });
+
+  await ok('Halaman (script asli index.html di DOM TIRUAN): timer, interval, NEXT, PLAY AGAIN, seek, interval kosong, tombol ✨', async () => {
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+    const mkEl = (id) => { const e = { id, style: { setProperty() {} }, classList: { add() {}, remove() {}, toggle() {} }, children: [], textContent: '', className: '', value: id === 'every' ? '0.5' : id === 'wc' ? '1' : '', hidden: id === 'sheet' || id === 'stage', open: false, disabled: false,
+      append(...a) { this.children.push(...a); }, replaceChildren(...a) { this.children = a; }, setAttribute() {}, addEventListener() {}, focus() {}, click() {}, appendChild(c) { this.children.push(c); return c; }, set innerHTML(v) {}, get innerHTML() { return ''; } }; return e; };
+    const els = {}; const intervals = []; const fetches = [];
+    let T = 0, WALL = 0, playing = true, calls = [];
+    const ctx = vm.createContext({
+      document: { getElementById: (id) => (els[id] ||= mkEl(id)), createElement: (t) => mkEl(t), documentElement: { style: { setProperty() {} } }, head: { appendChild() {} } },
+      window: {}, localStorage: { getItem: () => null, setItem() {} }, performance: { now: () => WALL * 1000 },
+      setInterval: (fn) => { intervals.push(fn); return intervals.length; }, setTimeout: () => 0, clearTimeout() {}, addEventListener() {}, removeEventListener() {},
+      innerWidth: 1000, innerHeight: 800, location: { origin: 'http://x' }, navigator: { clipboard: { writeText() {} } }, URL, AbortController, console,
+      fetch: async (url, opt) => { const body = JSON.parse(opt.body); fetches.push(body); return { json: async () => ({ ok: true, surface: 'カキー', viaTranslation: false, card: { type: 'single', romaji: 'Kakii', meaningId: 'x', meaningEn: 'y', hiragana: 'かきー', katakana: null, kanji: null, parts: [] } }) }; },
+    });
+    vm.runInContext(script, ctx);
+    const run = (c) => vm.runInContext(c, ctx);
+    const tick = () => { WALL += 0.5; if (playing) T += 0.5; intervals.forEach((f) => f()); };
+      const cues = Array.from({ length: 100 }, (_, i) => ({ start: i * 3, end: i * 3 + 2.5, text: 'c' + i }));
+      ctx.__cues = cues; ctx.__adapter = { play: () => { playing = true; }, pause: () => { playing = false; }, time: () => T, dur: () => 300, playing: () => playing, seek: (t) => { T = t; }, seekBy() {} };
+      run("P = __adapter; subs = { cues: __cues, lang: 'ja', auto: false };"); els.every.value = '0.5'; // interval 30 dtk
+      intervals.forEach((f) => f()); // tick pertama halaman saat video masih di 0:00
+      for (let i = 0; i < 59; i++) tick(); assert.strictEqual(fetches.length, 0, 'belum boleh menyorot sebelum 30 dtk');
+      tick(); await new Promise((r) => setImmediate(r));
+      assert.strictEqual(fetches.length, 1); assert.strictEqual(fetches[0].lines.length, 10); assert.strictEqual(fetches[0].lines[0].text, 'c0'); assert.strictEqual(fetches[0].lines.at(-1).text, 'c9');
+      assert.strictEqual(playing, false, 'video dijeda saat popup'); assert.strictEqual(els.sheet.hidden, false);
+      // NEXT memakai interval yang SAMA
+      els.next.onclick(); await new Promise((r) => setImmediate(r)); assert.deepStrictEqual(fetches[1].lines.map((l) => l.text), fetches[0].lines.map((l) => l.text));
+      // 100 detik jam dinding berlalu saat popup terbuka: interval tidak maju
+      for (let i = 0; i < 200; i++) tick(); assert.strictEqual(fetches.length, 2);
+      // PLAY AGAIN -> jendela baru mulai dari posisi video sekarang
+      els.again.onclick(); assert.strictEqual(playing, true);
+      for (let i = 0; i < 59; i++) tick(); assert.strictEqual(fetches.length, 2); tick(); await new Promise((r) => setImmediate(r));
+      assert.strictEqual(fetches.length, 3); assert.strictEqual(fetches[2].lines[0].text, 'c10'); assert.strictEqual(fetches[2].lines.at(-1).text, 'c19');
+      // seek: loncat ke 150 dtk lalu tunggu satu interval penuh
+      els.again.onclick(); T = 150; for (let i = 0; i < 59; i++) tick(); assert.strictEqual(fetches.length, 3, 'setelah seek, interval baru harus dihitung ulang dari posisi baru'); tick(); tick(); await new Promise((r) => setImmediate(r)); // tick pertama = deteksi seek
+      assert.strictEqual(fetches.length, 4); assert.ok(fetches[3].lines[0].text === 'c50' && ['c59', 'c60'].includes(fetches[3].lines.at(-1).text), fetches[3].lines.map((l) => l.text).join());
+      // interval kosong -> pesan NO_WORDS lokal (tanpa memanggil server)
+      els.again.onclick(); T = 280; run("subs = { cues: __cues.slice(0, 5), lang: 'ja' }"); for (let i = 0; i < 70; i++) tick(); await new Promise((r) => setImmediate(r));
+      assert.strictEqual(fetches.length, 4); assert.ok(JSON.stringify(els.cardBody.children).includes('PLAY AGAIN'));
+      // tombol ✨ pada menit ke-5 tanpa timer
+      run("subs = { cues: __cues, lang: 'ja' }"); els.again.onclick(); els.now.onclick(); await new Promise((r) => setImmediate(r));
+      assert.strictEqual(fetches.length, 5);
   });
 
   console.log('\n' + passed + ' tes lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ', semua aman'));
