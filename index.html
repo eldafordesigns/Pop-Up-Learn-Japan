@@ -134,6 +134,7 @@ details[open] summary::after{transform:rotate(45deg)}
 .ctl button:disabled{cursor:not-allowed;opacity:.45}
 #toggle{background:var(--grad-hot);box-shadow:0 12px 28px rgba(255,110,130,.45)}
 .set{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.set label{font-size:.546rem}
 .sub{min-height:3em;margin:14px 0 0;padding:12px 16px;border-radius:18px;background:rgba(255,255,255,.12);color:#fff;font-size:.98rem}
 .sub:empty{background:transparent;padding:0}
 
@@ -238,9 +239,9 @@ details[open] summary::after{transform:rotate(45deg)}
     <div class="row"><input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/..."><button id="load">Load</button></div>
     <p id="status" class="status" role="status"></p>
     <details id="pasteBox"><summary>Subtitle not detected? Paste manually</summary>
-      <p class="status" style="margin:6px 0 8px;font-size:.72rem">Open a subtitle download site&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;download the .srt/.vtt file&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;add the file in the box below&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;select the subtitle language&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;click Apply</p>
+      <p class="status" style="margin:6px 0 8px;font-size:.72rem">Open the subtitle downloader site&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;download the .srt/.vtt file&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;choose file in the box below&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;select the subtitle language&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;click APPLY</p>
       <div class="row" style="margin-bottom:6px"><button id="openDown" type="button" class="alt" style="flex:1">Open DownSub</button><button id="openSave" type="button" class="alt" style="flex:1">Open SaveSubs</button></div>
-      <p class="note" style="margin:0 0 10px">Your video link is copied automatically. If the field on the site is empty, just paste it (Ctrl+V). Beware of ads on that site: do not install any app or extension.</p>
+      <p class="note" style="margin:0 0 10px">Your video link is copied automatically. If the field on the site is empty, just paste it (Ctrl+V).</p>
       <label for="paste">Paste subtitle content (.srt or .vtt)</label>
       <textarea id="paste" placeholder="Paste the subtitle content here"></textarea>
       <label for="file" style="margin-top:12px">Or select a subtitle file (.srt / .vtt)</label><input id="file" type="file" accept=".srt,.vtt,.txt,text/*">
@@ -251,9 +252,9 @@ details[open] summary::after{transform:rotate(45deg)}
 
   <section id="stage" hidden>
     <div id="player" class="player"></div>
-    <div class="seek"><span id="tcur">0:00</span><input id="seekbar" type="range" min="0" max="1000" step="1" value="0" disabled aria-label="Video position"><span id="tdur">0:00</span></div>
-    <div class="ctl"><button id="back" class="alt" aria-label="Back 10 seconds">&lt; 10 sec</button><button id="toggle" aria-label="Play or pause">▶ Play</button><button id="fwd" class="alt" aria-label="Forward 10 seconds">10 sec &gt;</button></div>
-    <button id="sbxBtn" type="button" class="alt" hidden style="width:100%;min-height:44px;font-size:.8rem;margin:-8px 0 14px"></button>
+    <div id="seekRow" class="seek"><span id="tcur">0:00</span><input id="seekbar" type="range" min="0" max="1000" step="1" value="0" disabled aria-label="Video position"><span id="tdur">0:00</span></div>
+    <div id="ctlRow" class="ctl"><button id="back" class="alt" aria-label="Back 10 seconds">&lt; 10 sec</button><button id="toggle" aria-label="Play or pause">▶ Play</button><button id="fwd" class="alt" aria-label="Forward 10 seconds">10 sec &gt;</button></div>
+    <button id="sbxBtn" type="button" class="alt" hidden style="width:100%;min-height:44px;font-size:.8rem;margin:8px 0 14px"></button>
     <section id="manual" class="card" hidden aria-label="Manual subtitle timeline">
       <div id="mSetup">
         <p class="status" style="margin:0 0 12px">Enter the video duration to synchronize subtitles, then press Start Subtitles at the same time as the video.</p>
@@ -265,7 +266,7 @@ details[open] summary::after{transform:rotate(45deg)}
       </div>
       <div id="mRun" hidden>
         <div class="seek" style="margin-top:0"><span id="mcur">0:00</span><input id="mbar" type="range" min="0" max="1" step="1" value="0" aria-label="Subtitle timeline position"><span id="mtot">0:00</span></div>
-        <div class="mctl"><button id="mback" type="button" class="alt" aria-label="Back 10 seconds on the subtitle timeline">&lt; 10 sec</button><button id="mpause" type="button">⏸&#xFE0E; Pause subtitles</button><button id="mfwd" type="button" class="alt" aria-label="Forward 10 seconds on the subtitle timeline">10 sec &gt;</button></div>
+        <div class="mctl"><button id="mback" type="button" class="alt" aria-label="Back 10 seconds on the subtitle timeline">&lt; 10 sec</button><button id="mpause" type="button">❚❚ Pause subtitles</button><button id="mfwd" type="button" class="alt" aria-label="Forward 10 seconds on the subtitle timeline">10 sec &gt;</button></div>
         <p class="mnote">This timeline only controls the subtitles and the Highlight Words timing. It does NOT control the external video, so match the two positions yourself.</p>
         <button id="mreset" type="button" class="alt" style="width:100%;margin-top:10px;min-height:44px;font-size:.8rem">Change duration / restart timeline</button>
       </div>
@@ -470,19 +471,19 @@ function mountWindow(info, loose) {
   const noop = () => {};
   return { viewOnly: true, play: noop, pause: noop, seekBy: noop, seek: noop, time: () => 0, dur: () => 0, playing: () => false, destroy: noop };
 }
-function setCtl(on) { ['toggle', 'back', 'fwd'].forEach((k) => { $(k).disabled = !on; }); }
+function setCtl(on) { ['toggle', 'back', 'fwd'].forEach((k) => { $(k).disabled = !on; }); $('seekRow').hidden = !on; $('ctlRow').hidden = !on; } // sumber jendela: tombol -10/+10/Play dan bar durasi disembunyikan karena tidak berfungsi
 async function loadEmbed(emb) {
   status('Loading player…'); $('stage').hidden = false;
   if (emb.kind === 'animeembed') {
     try { P = await mountAnimeEmbed(emb); } catch (e) { return status('Failed to load the AnimeEmbed control SDK (animeembed.com/assets/sdk.js). Check your internet or ad blocker, then press Load again.', true); }
-    status('⏳ AnimeEmbed player loaded. Waiting for the control connection…');
+    status('AnimeEmbed player loaded. Waiting for the control connection…');
   }
-  else if (emb.kind === 'vidrift') { P = mountVidRift(emb); status('⏳ VidRift player loaded. Waiting for the control connection…'); }
+  else if (emb.kind === 'vidrift') { P = mountVidRift(emb); status('VidRift player loaded. Waiting for the control connection…'); }
   else { lastWin = emb; looseSbx = false; P = mountWindow(emb, false); setCtl(false); paintSbx(); $('sbxBtn').hidden = false; status(emb.note === 'kuroko' ? KUROKO_MSG : WINDOW_MSG, false, true); }
 }
 /* Cadangan bila ada player yang menolak diputar di dalam sandbox: pengguna bisa melonggarkan perlindungan (dan mengaktifkannya lagi). */
 let lastWin = null, looseSbx = false, loadSeq = 0;
-function paintSbx() { $('sbxBtn').textContent = looseSbx ? '🛡 Re-enable pop-up protection' : 'Video not playing? Loosen pop-up protection'; }
+function paintSbx() { $('sbxBtn').textContent = looseSbx ? 'Re-enable pop-up protection' : 'Video not playing? Loosen pop-up protection'; }
 $('sbxBtn').onclick = () => {
   if (!lastWin) return;
   looseSbx = !looseSbx; P = mountWindow(lastWin, looseSbx); setCtl(false); paintSbx();
@@ -504,7 +505,7 @@ function parseSubs(txt) {
 
 /* ---------- Ambil subtitle otomatis (hanya di memori halaman ini; tidak disimpan di perangkat) ---------- */
 async function getSubs(raw) {
-  status('⏳ Retrieving subtitles from the video… (may take up to 20 seconds)'); subs = null; resetTimer();
+  status('Retrieving subtitles from the video… (may take up to 20 seconds)'); subs = null; resetTimer();
   try {
     const r = await (await fetch('/api/subtitles?url=' + encodeURIComponent(raw), { signal: timeoutSignal(25000) })).json();
     if (r.ok) { subs = { cues: r.cues, lang: r.language, auto: r.auto }; status(`✅ SUCCESS: ${r.cues.length} subtitle lines (language: ${r.language}${r.auto ? ', automatic' : ''}). Press Play.`); }
@@ -516,8 +517,8 @@ async function getSubs(raw) {
    Server membaca yang tersedia publik di halaman/pemutar milik link ini (<track>, konfigurasi pemutar, iframe pemutar),
    jadi subtitle terhubung dengan episode yang diputar. Bila tidak ada / ditolak situs: tampilkan alasannya + panel manual. */
 async function getPageSubs(raw, seq) {
-  status('⏳ Looking for subtitles at the video source… (may take up to 20 seconds)'); subs = null; resetTimer();
-  const note = P && P.viewOnly ? ' This source is shown as a window: automatic pause is not available, but the ✨ button still works. If the player box is empty, that site does not allow embedding.' : '';
+  status('Looking for subtitles at the video source… (may take up to 20 seconds)'); subs = null; resetTimer();
+  const WIN_SUB_MSG = 'This source is shown as a window, automatic pause is not available and subtitles are played manually.', note = P && P.viewOnly ? ' ' + WIN_SUB_MSG : '';
   try {
     const r = await (await fetch('/api/page-subtitles?pref=' + encodeURIComponent($('pasteLang').value) + '&url=' + encodeURIComponent(raw), { signal: timeoutSignal(25000) })).json();
     if (seq !== loadSeq) return; // pengguna sudah memuat video lain
@@ -526,7 +527,7 @@ async function getPageSubs(raw, seq) {
       $('pasteBox').open = false;
       status(`✅ ${r.cues.length} subtitle lines retrieved automatically from the video source (language: ${r.label || r.language}).` + (P && P.viewOnly ? note : ' Press Play.'));
       offerManual();
-    } else { status('❌ ' + (r.message || 'Subtitles could not be retrieved automatically.') + note, true, true); $('pasteBox').open = true; }
+    } else { status(P && P.viewOnly ? WIN_SUB_MSG : '❌ ' + (r.message || 'Subtitles could not be retrieved automatically.'), true, true); $('pasteBox').open = true; }
   } catch (e) { if (seq !== loadSeq) return; status('❌ FAILED: the server did not respond in time. Press Load to try again, or use "Paste manually".' + note, true, true); $('pasteBox').open = true; }
 }
 
@@ -666,7 +667,7 @@ function manualPaint() {
   if (!mDrag) { $('mcur').textContent = fmt(p); mb.value = Math.floor(p); }
   mb.style.setProperty('--pct', (d ? p / d * 100 : 0) + '%');
   $('mtot').textContent = fmt(d);
-  $('mpause').textContent = c.running ? '⏸\uFE0E Pause subtitles' : '▶ Resume subtitles';
+  $('mpause').textContent = c.running ? '❚❚ Pause subtitles' : '▶ Resume subtitles';
   mMsg(c.running ? 'Subtitle timer is running.' : p >= d ? 'Subtitle timer stopped: the entered video duration was reached.' : 'Subtitle timer is paused.');
 }
 function offerManual() { // dipanggil setelah subtitle terpasang (Apply atau otomatis); hanya menampilkan komponen bila video tidak bisa dikontrol
@@ -718,7 +719,7 @@ setInterval(() => {
   if (mn.started) return manualTick(); // sumber tidak bisa dikontrol: pakai jam subtitle manual
   if (!P) return;
   let playing = false, t = 0; try { playing = P.playing(); t = P.time() || 0; } catch (e) {}
-  $('toggle').textContent = playing ? '⏸\uFE0E Pause' : '▶ Play';
+  $('toggle').textContent = playing ? '❚❚ Pause' : '▶ Play';
   if (subs) { const c = subs.cues.filter((x) => x.start <= t && x.end >= t)[0]; $('sub').textContent = c ? c.text : ''; }
   const I = intervalSeconds($('every').value), act = stepTimer(tm, t, performance.now() / 1000, I);
   if (!$('sheet').hidden || busy) return;
@@ -847,7 +848,7 @@ async function highlight(win) {
   curWin = win; // NEXT memakai interval yang sama (mode manual: awal sama, akhir mengikuti waktu subtitle terkini)
   const wk = man ? 'm|' + win.from : win.from + '|' + win.to; if (wk !== shownKey) { shown = []; shownKey = wk; } // interval baru / seek: riwayat kata interval sebelumnya tidak ikut (mode manual: kunci hanya awal, agar kata yang sudah tampil tidak berulang saat akhir rentang maju)
   $('again').textContent = man ? '✕ CLOSE' : '▶ PLAY AGAIN';
-  openSheet(true); renderMsg('⏳ Finding words for you…');
+  openSheet(true); renderMsg('Finding words for you…');
   const lines = capLines(cuesIn(subs.cues, win.from, win.to), MAX_LINES, MAX_CHARS);
   if (!lines.length) { renderMsg(man ? MANUAL_NO_WORDS_MSG : NO_WORDS_MSG); busy = false; return; } // memang tidak ada subtitle dalam interval ini
   try {
