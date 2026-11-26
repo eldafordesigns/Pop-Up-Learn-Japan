@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="id">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#7b8cff">
 <meta name="referrer" content="strict-origin-when-cross-origin">
-<title>Belajar Jepang dari Video</title>
+<title>Learn Japanese from Videos</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -219,43 +219,43 @@ details[open] summary::after{transform:rotate(45deg)}
   </header>
 
   <section class="hero">
-    <h1><b>Belajar</b><span class="jp">Jepang</span> dari Video</h1>
-    <p>Tempel link video, file .mp4, atau link pemutar situs lain, lalu temukan kata baru di sela-sela video favoritmu.</p>
+    <h1><b>Learn</b><span class="jp">Japanese</span> from Videos</h1>
+    <p>Paste a video link, an .mp4 file, or a player link from another site, then discover new words while you watch your favorite videos.</p>
   </section>
 
   <section class="card">
-    <label for="link">Link video</label>
-    <div class="row"><input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/..."><button id="load">Muat</button></div>
+    <label for="link">Video URL (YouTube or .mp4 file)</label>
+    <div class="row"><input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/..."><button id="load">Load</button></div>
     <p id="status" class="status" role="status"></p>
-    <details id="pasteBox"><summary>Subtitle tidak terbaca? Tempel manual</summary>
-      <p class="status" style="margin:6px 0 8px;font-size:.72rem">Buka situs unduh subtitle&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;unduh file .srt/.vtt&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;input file pada kotak di bawah&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;pilih jenis bahasa pada subtitle&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;klik pakai</p>
-      <div class="row" style="margin-bottom:6px"><button id="openDown" type="button" class="alt" style="flex:1">Buka DownSub</button><button id="openSave" type="button" class="alt" style="flex:1">Buka SaveSubs</button></div>
-      <p class="note" style="margin:0 0 10px">Link videomu otomatis disalin. Jika kolom di situs kosong, tempel saja (Ctrl+V). Hati-hati dengan iklan di situs itu: jangan pasang aplikasi atau ekstensi apa pun.</p>
-      <label for="paste">Isi file subtitle (.srt atau .vtt)</label>
-      <textarea id="paste" placeholder="Tempel isi subtitle di sini"></textarea>
-      <label for="file" style="margin-top:12px">Atau pilih file subtitle (.srt / .vtt)</label><input id="file" type="file" accept=".srt,.vtt,.txt,text/*">
-      <label for="pasteLang" style="margin-top:12px">Bahasa pada subtitle yang di input</label>
-      <div class="row"><select id="pasteLang" aria-label="Bahasa subtitle"><option value="ja">Jepang</option><option value="id">Indonesia</option><option value="en">Inggris</option></select><button id="usePaste" class="alt">Pakai</button></div>
+    <details id="pasteBox"><summary>Subtitle not detected? Paste manually</summary>
+      <p class="status" style="margin:6px 0 8px;font-size:.72rem">Open a subtitle download site&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;download the .srt/.vtt file&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;add the file in the box below&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;select the subtitle language&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;click Apply</p>
+      <div class="row" style="margin-bottom:6px"><button id="openDown" type="button" class="alt" style="flex:1">Open DownSub</button><button id="openSave" type="button" class="alt" style="flex:1">Open SaveSubs</button></div>
+      <p class="note" style="margin:0 0 10px">Your video link is copied automatically. If the field on the site is empty, just paste it (Ctrl+V). Beware of ads on that site: do not install any app or extension.</p>
+      <label for="paste">Paste subtitle content (.srt or .vtt)</label>
+      <textarea id="paste" placeholder="Paste the subtitle content here"></textarea>
+      <label for="file" style="margin-top:12px">Or select a subtitle file (.srt / .vtt)</label><input id="file" type="file" accept=".srt,.vtt,.txt,text/*">
+      <label for="pasteLang" style="margin-top:12px">Language of the subtitle you entered</label>
+      <div class="row"><select id="pasteLang" aria-label="Subtitle language"><option value="ja">Japanese</option><option value="id">Indonesian</option><option value="en">English</option></select><button id="usePaste" class="alt">Apply</button></div>
     </details>
   </section>
 
   <section id="stage" hidden>
     <div id="player" class="player"></div>
-    <div class="seek"><span id="tcur">0:00</span><input id="seekbar" type="range" min="0" max="1000" step="1" value="0" disabled aria-label="Posisi video"><span id="tdur">0:00</span></div>
-    <div class="ctl"><button id="back" class="alt" aria-label="Mundur 10 detik">&lt; 10 dtk</button><button id="toggle" aria-label="Putar atau jeda">▶ Putar</button><button id="fwd" class="alt" aria-label="Maju 10 detik">10 dtk &gt;</button></div>
+    <div class="seek"><span id="tcur">0:00</span><input id="seekbar" type="range" min="0" max="1000" step="1" value="0" disabled aria-label="Video position"><span id="tdur">0:00</span></div>
+    <div class="ctl"><button id="back" class="alt" aria-label="Back 10 seconds">&lt; 10 sec</button><button id="toggle" aria-label="Play or pause">▶ Play</button><button id="fwd" class="alt" aria-label="Forward 10 seconds">10 sec &gt;</button></div>
     <button id="sbxBtn" type="button" class="alt" hidden style="width:100%;min-height:44px;font-size:.8rem;margin:-8px 0 14px"></button>
     <div class="card">
       <div class="set">
-        <div><label for="every">Jeda sorotan (menit)</label><div class="stepper"><button id="evDec" type="button" class="alt" aria-label="Kurangi jeda">−</button><input id="every" type="number" min="0.5" max="60" step="0.5" value="3" inputmode="decimal"><button id="evInc" type="button" class="alt" aria-label="Tambah jeda">+</button></div></div>
-        <div><label for="wc">Kata per sorotan</label><select id="wc"><option value="1">1 kata</option><option value="2">2 kata</option><option value="3">3 kata</option></select></div>
+        <div><label for="every">Highlight interval (minutes)</label><div class="stepper"><button id="evDec" type="button" class="alt" aria-label="Decrease interval">−</button><input id="every" type="number" min="0.5" max="60" step="0.5" value="3" inputmode="decimal"><button id="evInc" type="button" class="alt" aria-label="Increase interval">+</button></div></div>
+        <div><label for="wc">Words per highlight</label><select id="wc"><option value="1">1 word</option><option value="2">2 words</option><option value="3">3 words</option></select></div>
       </div>
-      <button id="now" style="width:100%;margin-top:14px">✨ Sorot kata sekarang</button>
+      <button id="now" style="width:100%;margin-top:14px">✨ Highlight words now</button>
       <p id="sub" class="sub"></p>
     </div>
   </section>
 </main>
 
-<div id="sheet" class="sheet" hidden role="dialog" aria-modal="true" aria-label="Kata untuk dipelajari">
+<div id="sheet" class="sheet" hidden role="dialog" aria-modal="true" aria-label="Word to learn">
   <div class="panel">
     <div id="cardBody"></div>
     <div class="btns"><button id="again">▶ PLAY AGAIN</button><button id="next" class="alt">NEXT ➜</button></div>
@@ -265,7 +265,7 @@ details[open] summary::after{transform:rotate(45deg)}
 <script>
 'use strict';
 const $ = (id) => document.getElementById(id);
-let P = null, subs = null, acc = 0, busy = false, shown = [], ytLoading = null;
+let P = null, subs = null, busy = false, shown = [], ytLoading = null, curWin = null;
 
 /* ---------- Efek paralaks latar (hanya tampilan) ---------- */
 (function () {
@@ -303,7 +303,7 @@ function ytId(raw) {
 
 /* ---------- Pemutar ---------- */
 const ytAdapter = (y) => ({ play: () => y.playVideo(), pause: () => y.pauseVideo(), seekBy: (d) => y.seekTo(Math.max(0, y.getCurrentTime() + d), true), time: () => y.getCurrentTime(), dur: () => y.getDuration(), seek: (t) => y.seekTo(t, true), playing: () => y.getPlayerState() === 1 });
-const vidAdapter = (v) => ({ play: () => { const r = v.play(); if (r && r.catch) r.catch(() => status('Video tidak bisa diputar. Periksa linknya.', true)); }, pause: () => v.pause(), seekBy: (d) => { v.currentTime = Math.max(0, v.currentTime + d); }, time: () => v.currentTime, dur: () => v.duration, seek: (t) => { v.currentTime = t; }, playing: () => !v.paused && !v.ended });
+const vidAdapter = (v) => ({ play: () => { const r = v.play(); if (r && r.catch) r.catch(() => status('The video cannot be played. Check the link.', true)); }, pause: () => v.pause(), seekBy: (d) => { v.currentTime = Math.max(0, v.currentTime + d); }, time: () => v.currentTime, dur: () => v.duration, seek: (t) => { v.currentTime = t; }, playing: () => !v.paused && !v.ended });
 
 function loadYT() {
   if (ytLoading) return ytLoading;
@@ -315,7 +315,7 @@ function loadYT() {
   });
   return ytLoading;
 }
-const YT_ERR = { 2: 'Link video tidak valid.', 5: 'Pemutar YouTube bermasalah di browser ini. Muat ulang halaman (Ctrl+F5).', 100: 'Video tidak ditemukan atau bersifat pribadi.', 101: 'Pemilik video melarang diputar di luar YouTube. Coba video lain.', 150: 'Pemilik video melarang diputar di luar YouTube. Coba video lain.', 153: 'YouTube menolak pemutar ini (error 153). Muat ulang halaman dengan Ctrl+F5, lalu coba lagi.' };
+const YT_ERR = { 2: 'Invalid video link.', 5: 'The YouTube player has a problem in this browser. Reload the page (Ctrl+F5).', 100: 'Video not found or it is private.', 101: 'The video owner does not allow playback outside YouTube. Try another video.', 150: 'The video owner does not allow playback outside YouTube. Try another video.', 153: 'YouTube rejected this player (error 153). Reload the page with Ctrl+F5, then try again.' };
 async function mountYouTube(id) {
   await loadYT();
   $('player').innerHTML = '<div id="yt"></div>';
@@ -326,7 +326,7 @@ async function mountYouTube(id) {
       playerVars: { playsinline: 1, controls: 0, rel: 0, modestbranding: 1, origin: location.origin },
       events: {
         onReady: (e) => { clearTimeout(timer); res(ytAdapter(e.target)); },
-        onError: (e) => { clearTimeout(timer); status(YT_ERR[e.data] || ('Video tidak bisa diputar (kode ' + e.data + ').'), true); }
+        onError: (e) => { clearTimeout(timer); status(YT_ERR[e.data] || ('The video cannot be played (code ' + e.data + ').'), true); }
       }
     });
   });
@@ -341,9 +341,9 @@ function mountVideo(src) {
    jadi pop-up, jeda otomatis, PLAY AGAIN, NEXT, subtitle, dan bar durasi tidak tahu dan tidak perlu tahu sumbernya. */
 // Mencabut izin Fullscreen API untuk iframe lintas-domain (berlaku di desktop, Android, iPad). TIDAK berpengaruh di iPhone Safari: di sana tidak ada Fullscreen API, dan fullscreen video memakai jalur native WebKit (video.webkitEnterFullscreen) yang tidak digerbang oleh izin ini.
 const IFRAME_ALLOW = "autoplay; picture-in-picture; encrypted-media; fullscreen 'none'";
-const WINDOW_MSG = 'Situs ini tampil sebagai jendela. Browser melarang aplikasi mengontrol player situs lain, jadi jeda otomatis TIDAK tersedia di sumber ini (untuk jeda otomatis pakai link embed AnimeEmbed atau VidRift). Tombol ✨ tetap bisa dipakai. Jika kotak pemutar kosong, situs itu melarang disematkan.';
+const WINDOW_MSG = 'This site is shown as a window. Browsers do not let apps control another site\'s player, so automatic pause is NOT available for this source (for automatic pause, use an AnimeEmbed or VidRift embed link). The ✨ button still works. If the player box is empty, that site does not allow embedding.';
 
-const KUROKO_MSG = 'Kuroko tidak menyediakan API kontrol player (dokumentasinya hanya memuat URL embed dan parameter, tanpa postMessage), dan player-nya ada di domain lain yang tidak bisa dijangkau browser. Karena itu jeda otomatis TIDAK mungkin untuk sumber ini. Tombol ✨ tetap bisa dipakai. Tip: link kuroko.cc/embed/ani/{AniListID}/{episode}/sub menampilkan player saja.';
+const KUROKO_MSG = 'Kuroko does not provide a player control API (its documentation only covers the embed URL and parameters, with no postMessage), and its player lives on another domain that the browser cannot reach. Automatic pause is therefore NOT possible for this source. The ✨ button still works. Tip: the link kuroko.cc/embed/ani/{AniListID}/{episode}/sub shows the player only.';
 function classifyEmbed(raw) {
   let u; try { u = new URL(raw); } catch (e) { return null; }
   if (u.protocol !== 'https:') return null; // http tidak bisa dimuat di dalam halaman https
@@ -363,7 +363,7 @@ function classifyEmbed(raw) {
 const SANDBOX_SAFE = 'allow-scripts allow-same-origin allow-forms allow-presentation';
 function mountFrame(src, sandbox) {
   const f = document.createElement('iframe');
-  f.title = 'Pemutar video'; f.allow = IFRAME_ALLOW; f.referrerPolicy = 'strict-origin-when-cross-origin';
+  f.title = 'Video player'; f.allow = IFRAME_ALLOW; f.referrerPolicy = 'strict-origin-when-cross-origin';
   // tanpa atribut allowfullscreen. AnimeEmbed dan VidRift dimuat TANPA sandbox (keduanya menolak diputar di iframe ber-sandbox);
   // hanya sumber "jendela" yang memakai sandbox (lihat mountWindow).
   if (sandbox) f.setAttribute('sandbox', sandbox);
@@ -382,7 +382,7 @@ function listenFrame(frame, origin, fn) {
   const h = (e) => { if (e.source === frame.contentWindow && e.origin === origin && e.data) fn(e.data); };
   addEventListener('message', h); return () => removeEventListener('message', h);
 }
-function embedStatus(name) { status(`✅ ${name} tersambung: jeda & lanjut otomatis aktif.` + (subs ? ` ${subs.cues.length} baris subtitle dipakai.` : ' Tempel subtitle .srt/.vtt (Jepang) di bawah agar sorotan kata bisa jalan.')); }
+function embedStatus(name) { status(`✅ ${name} connected: automatic pause & resume is active.` + (subs ? ` ${subs.cues.length} subtitle lines in use.` : ' Paste a Japanese .srt/.vtt subtitle below so word highlights can work.')); }
 
 /* AnimeEmbed: event lewat postMessage (channel "animeembed", versi 1), perintah lewat SDK resmi mereka. */
 let aeSdk = null;
@@ -403,10 +403,10 @@ async function mountAnimeEmbed(info) {
     else if (m.event === 'pause' || m.event === 'ended') { if (typeof d.currentTime === 'number') clk.set(d.currentTime, d.duration); clk.mode(false, false); }
     else if (m.event === 'buffering') clk.mode(clk.run, true);
     else if (m.event === 'progress') { const was = clk.now(); clk.set(d.currentTime, d.duration); if (!clk.run && d.currentTime > was + 0.5) clk.run = true; clk.stalled = false; }
-    else if (m.event === 'error') status('Pemutar AnimeEmbed melapor error: ' + (d.message || 'tidak diketahui') + '.', true);
+    else if (m.event === 'error') status('The AnimeEmbed player reported an error: ' + (d.message || 'unknown') + '.', true);
   });
-  setTimeout(() => { if (!heard && P && P.destroy === destroy) status('Pemutar AnimeEmbed belum mengirim sinyal apa pun. Periksa link embed-nya, atau muat ulang. Kontrol otomatis belum tersambung.', true); }, 15000);
-  const send = (name, args, undo) => { let r; try { r = sdk.command(name, args); } catch (e) { r = Promise.reject(e); } if (r && r.catch) r.catch((e) => { if (undo) undo(); status('Pemutar menolak perintah "' + name + '"' + (e && e.message ? ': ' + e.message : '') + '. Klik sekali di dalam pemutar lalu coba lagi.', true); }); };
+  setTimeout(() => { if (!heard && P && P.destroy === destroy) status('The AnimeEmbed player has not sent any signal yet. Check the embed link, or reload. Automatic control is not connected yet.', true); }, 15000);
+  const send = (name, args, undo) => { let r; try { r = sdk.command(name, args); } catch (e) { r = Promise.reject(e); } if (r && r.catch) r.catch((e) => { if (undo) undo(); status('The player rejected the command "' + name + '"' + (e && e.message ? ': ' + e.message : '') + '. Click once inside the player and try again.', true); }); };
   const seek = (t) => { t = Math.max(0, t); clk.set(t); send('seek', { time: t }); };
   const destroy = () => { off(); try { sdk.destroy && sdk.destroy(); } catch (e) {} };
   return { play: () => { clk.mode(true, false); send('play', undefined, () => clk.mode(false, false)); }, pause: () => { clk.mode(false, false); send('pause'); }, seekBy: (d) => seek(clk.now() + d), seek, time: () => clk.now(), dur: () => clk.dur, playing: () => clk.run, destroy };
@@ -423,15 +423,15 @@ function mountVidRift(info) {
     else if (m.type === 'vidrift:progress') { clk.set(m.currentTime, m.duration); clk.mode(true, false); }
     else if (m.type === 'vidrift:unpaused') { clk.set(m.currentTime); clk.mode(true, false); }
     else if (m.type === 'vidrift:paused' || m.type === 'vidrift:ended') { clk.set(m.currentTime); clk.mode(false, false); }
-    else if (m.type === 'vidrift:wont-play') status('VidRift: semua sumber gagal memutar judul ini' + (m.reason ? ' (' + m.reason + ')' : '') + '. Coba episode/judul lain.', true);
+    else if (m.type === 'vidrift:wont-play') status('VidRift: all sources failed to play this title' + (m.reason ? ' (' + m.reason + ')' : '') + '. Try another episode/title.', true);
     else if (m.type === 'vidrift:command-error') {
       if (m.command === 'vidrift:play') clk.mode(false, false);
-      status(m.reason === 'click-required' ? 'VidRift meminta satu klik penonton di dalam pemutar sebelum bisa dilanjutkan. Klik video sekali lalu lanjutkan.' : 'VidRift menolak perintah ' + (m.command || '') + (m.reason ? ' (' + m.reason + ')' : '') + '.', true);
+      status(m.reason === 'click-required' ? 'VidRift needs one viewer click inside the player before it can continue. Click the video once, then continue.' : 'VidRift rejected the command ' + (m.command || '') + (m.reason ? ' (' + m.reason + ')' : '') + '.', true);
     }
   });
   const onLoad = () => { clk.set(0); clk.mode(false, false); post({ type: 'vidrift:get-state' }); }; // dipanggil lagi bila pemutar ganti episode (iframe dimuat ulang)
   f.addEventListener('load', onLoad);
-  setTimeout(() => { if (!heard && P && P.destroy === destroy) status('Pemutar VidRift belum mengirim sinyal apa pun. Periksa link embed-nya, atau muat ulang. Kontrol otomatis belum tersambung.', true); }, 15000);
+  setTimeout(() => { if (!heard && P && P.destroy === destroy) status('The VidRift player has not sent any signal yet. Check the embed link, or reload. Automatic control is not connected yet.', true); }, 15000);
   const seek = (t) => { t = Math.max(0, t); clk.set(t); post({ type: 'vidrift:resume', currentTime: t }); };
   const destroy = () => { off(); f.removeEventListener('load', onLoad); };
   return { play: () => { clk.mode(true, false); post({ type: 'vidrift:play' }); }, pause: () => { clk.mode(false, false); post({ type: 'vidrift:pause' }); }, seekBy: (d) => seek(clk.now() + d), seek, time: () => clk.now(), dur: () => clk.dur, playing: () => clk.run, destroy };
@@ -445,21 +445,21 @@ function mountWindow(info, loose) {
 }
 function setCtl(on) { ['toggle', 'back', 'fwd'].forEach((k) => { $(k).disabled = !on; }); }
 async function loadEmbed(emb) {
-  status('Memuat pemutar…'); $('stage').hidden = false;
+  status('Loading player…'); $('stage').hidden = false;
   if (emb.kind === 'animeembed') {
-    try { P = await mountAnimeEmbed(emb); } catch (e) { return status('Gagal memuat SDK kontrol AnimeEmbed (animeembed.com/assets/sdk.js). Periksa internet atau pemblokir iklan, lalu tekan Muat lagi.', true); }
-    status('⏳ Pemutar AnimeEmbed dimuat. Menunggu sambungan kontrol…');
+    try { P = await mountAnimeEmbed(emb); } catch (e) { return status('Failed to load the AnimeEmbed control SDK (animeembed.com/assets/sdk.js). Check your internet or ad blocker, then press Load again.', true); }
+    status('⏳ AnimeEmbed player loaded. Waiting for the control connection…');
   }
-  else if (emb.kind === 'vidrift') { P = mountVidRift(emb); status('⏳ Pemutar VidRift dimuat. Menunggu sambungan kontrol…'); }
+  else if (emb.kind === 'vidrift') { P = mountVidRift(emb); status('⏳ VidRift player loaded. Waiting for the control connection…'); }
   else { lastWin = emb; looseSbx = false; P = mountWindow(emb, false); setCtl(false); paintSbx(); $('sbxBtn').hidden = false; status(emb.note === 'kuroko' ? KUROKO_MSG : WINDOW_MSG, false, true); }
 }
 /* Cadangan bila ada player yang menolak diputar di dalam sandbox: pengguna bisa melonggarkan perlindungan (dan mengaktifkannya lagi). */
 let lastWin = null, looseSbx = false, loadSeq = 0;
-function paintSbx() { $('sbxBtn').textContent = looseSbx ? '🛡 Aktifkan lagi perlindungan pop-up' : 'Video tidak jalan? Longgarkan perlindungan pop-up'; }
+function paintSbx() { $('sbxBtn').textContent = looseSbx ? '🛡 Re-enable pop-up protection' : 'Video not playing? Loosen pop-up protection'; }
 $('sbxBtn').onclick = () => {
   if (!lastWin) return;
   looseSbx = !looseSbx; P = mountWindow(lastWin, looseSbx); setCtl(false); paintSbx();
-  status(looseSbx ? 'Perlindungan pop-up DIMATIKAN untuk sumber ini: situs bisa membuka tab iklan lagi. Aktifkan lagi setelah video jalan.' : 'Perlindungan pop-up aktif lagi.', looseSbx);
+  status(looseSbx ? 'Pop-up protection is OFF for this source: the site can open ad tabs again. Re-enable it once the video plays.' : 'Pop-up protection is active again.', looseSbx);
 };
 
 /* ---------- Subtitle manual (.srt / .vtt) ---------- */
@@ -477,56 +477,56 @@ function parseSubs(txt) {
 
 /* ---------- Ambil subtitle otomatis (hanya di memori halaman ini; tidak disimpan di perangkat) ---------- */
 async function getSubs(raw) {
-  status('⏳ Mengambil subtitle dari video… (bisa sampai 20 detik)'); subs = null; acc = 0;
+  status('⏳ Retrieving subtitles from the video… (may take up to 20 seconds)'); subs = null; resetTimer();
   try {
     const r = await (await fetch('/api/subtitles?url=' + encodeURIComponent(raw), { signal: timeoutSignal(25000) })).json();
-    if (r.ok) { subs = { cues: r.cues, lang: r.language, auto: r.auto }; status(`✅ BERHASIL: ${r.cues.length} baris subtitle (bahasa: ${r.language}${r.auto ? ', otomatis' : ''}). Tekan Putar.`); }
-    else { status(r.code === 'NO_SUBTITLE' ? 'Video ini tidak punya subtitle.' : '❌ GAGAL: ' + (r.message || 'Subtitle gagal dimuat.'), true, true); $('pasteBox').open = true; }
-  } catch (e) { status('❌ GAGAL: server tidak menjawab tepat waktu. Tekan Muat untuk mencoba lagi.', true, true); $('pasteBox').open = true; }
+    if (r.ok) { subs = { cues: r.cues, lang: r.language, auto: r.auto }; status(`✅ SUCCESS: ${r.cues.length} subtitle lines (language: ${r.language}${r.auto ? ', automatic' : ''}). Press Play.`); }
+    else { status(r.code === 'NO_SUBTITLE' ? 'This video has no subtitles.' : '❌ FAILED: ' + (r.message || 'Subtitles failed to load.'), true, true); $('pasteBox').open = true; }
+  } catch (e) { status('❌ FAILED: the server did not respond in time. Press Load to try again.', true, true); $('pasteBox').open = true; }
 }
 
 /* ---------- Subtitle otomatis dari halaman sumber video (selain YouTube) ----------
    Server membaca yang tersedia publik di halaman/pemutar milik link ini (<track>, konfigurasi pemutar, iframe pemutar),
    jadi subtitle terhubung dengan episode yang diputar. Bila tidak ada / ditolak situs: tampilkan alasannya + panel manual. */
 async function getPageSubs(raw, seq) {
-  status('⏳ Mencari subtitle di sumber video… (bisa sampai 20 detik)'); subs = null; acc = 0;
-  const note = P && P.viewOnly ? ' Sumber ini tampil sebagai jendela: jeda otomatis tidak tersedia, tombol ✨ tetap bisa dipakai. Jika kotak pemutar kosong, situs itu melarang disematkan.' : '';
+  status('⏳ Looking for subtitles at the video source… (may take up to 20 seconds)'); subs = null; resetTimer();
+  const note = P && P.viewOnly ? ' This source is shown as a window: automatic pause is not available, but the ✨ button still works. If the player box is empty, that site does not allow embedding.' : '';
   try {
     const r = await (await fetch('/api/page-subtitles?pref=' + encodeURIComponent($('pasteLang').value) + '&url=' + encodeURIComponent(raw), { signal: timeoutSignal(25000) })).json();
     if (seq !== loadSeq) return; // pengguna sudah memuat video lain
     if (r.ok) {
       subs = { cues: r.cues, lang: r.language && r.language !== 'und' ? r.language : $('pasteLang').value, auto: false };
       $('pasteBox').open = false;
-      status(`✅ ${r.cues.length} baris subtitle diambil otomatis dari sumber video (bahasa: ${r.label || r.language}).` + (P && P.viewOnly ? note : ' Tekan Putar.'));
-    } else { status('❌ ' + (r.message || 'Subtitle tidak bisa diambil otomatis.') + note, true, true); $('pasteBox').open = true; }
-  } catch (e) { if (seq !== loadSeq) return; status('❌ GAGAL: server tidak menjawab tepat waktu. Tekan Muat untuk mencoba lagi, atau pakai "Tempel manual".' + note, true, true); $('pasteBox').open = true; }
+      status(`✅ ${r.cues.length} subtitle lines retrieved automatically from the video source (language: ${r.label || r.language}).` + (P && P.viewOnly ? note : ' Press Play.'));
+    } else { status('❌ ' + (r.message || 'Subtitles could not be retrieved automatically.') + note, true, true); $('pasteBox').open = true; }
+  } catch (e) { if (seq !== loadSeq) return; status('❌ FAILED: the server did not respond in time. Press Load to try again, or use "Paste manually".' + note, true, true); $('pasteBox').open = true; }
 }
 
 /* ---------- Memuat video ---------- */
 $('load').onclick = async () => {
-  const raw = $('link').value.trim(); const seq = ++loadSeq; lastWin = null; $('sbxBtn').hidden = true; subs = null; shown = []; acc = 0; if (P) { try { P.pause(); } catch (e) {} if (P.destroy) { try { P.destroy(); } catch (e) {} P = null; } } setCtl(true);
-  if (!/^https?:\/\//i.test(raw)) return status('Tempel link yang dimulai dengan https://', true);
+  const raw = $('link').value.trim(); const seq = ++loadSeq; lastWin = null; $('sbxBtn').hidden = true; subs = null; shown = []; curWin = null; resetTimer(); if (P) { try { P.pause(); } catch (e) {} if (P.destroy) { try { P.destroy(); } catch (e) {} P = null; } } setCtl(true);
+  if (!/^https?:\/\//i.test(raw)) return status('Paste a link that starts with https://', true);
   const id = ytId(raw);
   try {
     if (id) {
-      status('Memuat pemutar video…'); $('stage').hidden = false;
+      status('Loading video player…'); $('stage').hidden = false;
       P = await mountYouTube(id);
       await getSubs(raw);
     } else if (/\.(mp4|webm|mov)(\?|#|$)/i.test(raw)) {
-      P = mountVideo(raw); $('stage').hidden = false; status('Video dimuat. Tempel subtitle manual di bawah agar sorotan kata bisa jalan.'); $('pasteBox').open = true;
+      P = mountVideo(raw); $('stage').hidden = false; status('Video loaded. Paste the subtitles manually below so word highlights can work.'); $('pasteBox').open = true;
     } else {
       const emb = classifyEmbed(raw);
       if (emb) { await loadEmbed(emb); if (P && seq === loadSeq) await getPageSubs(raw, seq); }
-      else status('Link belum didukung. Pakai link https:// (YouTube, file .mp4, atau halaman pemutar video).', true);
+      else status('This link is not supported yet. Use an https:// link (YouTube, an .mp4 file, or a video player page).', true);
     }
-  } catch (e) { status(e && e.message === 'timeout' ? 'Pemutar YouTube tidak merespons. Coba video lain, matikan pemblokir iklan untuk situs ini, atau muat ulang dengan Ctrl+F5.' : 'Gagal memuat. Periksa internet lalu coba lagi.', true); }
+  } catch (e) { status(e && e.message === 'timeout' ? 'The YouTube player is not responding. Try another video, turn off your ad blocker for this site, or reload with Ctrl+F5.' : 'Failed to load. Check your internet and try again.', true); }
 };
 function openSite(kind) {
   const raw = $('link').value.trim();
   if (/^https?:\/\//i.test(raw)) { try { navigator.clipboard.writeText(raw); } catch (e) {} }
   const url = kind === 'down' ? (ytId(raw) ? 'https://subtitle.to/' + raw : 'https://downsub.com/') : 'https://savesubs.com/';
   window.open(url, '_blank', 'noopener,noreferrer');
-  status('Link video disalin. Di situs itu: tempel link, unduh file .srt atau .vtt, lalu kembali ke sini dan pilih filenya.');
+  status('Video link copied. On that site: paste the link, download the .srt or .vtt file, then come back here and select the file.');
 }
 $('openDown').onclick = () => openSite('down');
 $('openSave').onclick = () => openSite('save');
@@ -534,12 +534,12 @@ $('file').onchange = async (e) => {
   const f = e.target.files[0]; if (!f) return;
   const txt = (await f.text()).slice(0, 2000000); $('paste').value = txt;
   if (/[\u3040-\u30FF]/.test(txt)) $('pasteLang').value = 'ja';
-  status('File dibaca. Pilih bahasa subtitle, lalu klik "Pakai".'); e.target.value = ''; // tab tetap terbuka sampai "Pakai" diklik
+  status('File loaded. Choose the subtitle language, then click "Apply".'); e.target.value = ''; // tab stays open until "Apply" is clicked
 };
 $('usePaste').onclick = () => {
   const cues = parseSubs($('paste').value);
-  if (!cues.length) return status('Subtitle tidak terbaca. Pastikan isinya format .srt atau .vtt.', true);
-  subs = { cues, lang: $('pasteLang').value, auto: false }; status(`✓ ${cues.length} baris subtitle dipakai.`);
+  if (!cues.length) return status('Subtitle not detected. Make sure the content is in .srt or .vtt format.', true);
+  subs = { cues, lang: $('pasteLang').value, auto: false }; status(`✓ ${cues.length} subtitle lines applied.`);
   $('pasteBox').open = false; // panel input hanya terlihat saat memasukkan/mengganti subtitle; isi subtitle (subs) & bahasa tetap
 };
 
@@ -563,27 +563,64 @@ setInterval(() => {
   $('tcur').textContent = fmt(t); sb.value = ok ? Math.min(1000, t / d * 1000) : 0; paintSeek();
 }, 250);
 
-/* ---------- Penghitung waktu: hanya jalan saat video sedang diputar ---------- */
-// Dihitung dari kemajuan waktu VIDEO (bukan jumlah detik jam), jadi tetap akurat di iPhone
-// walau status pemutar tidak terbaca dengan benar atau timer browser diperlambat.
-let lastT = null;
+/* ---------- Jendela interval: mengikuti WAKTU VIDEO (bukan jam dinding) ---------- */
+/* WINDOW-LOGIC-START (fungsi murni tanpa DOM; test.js memuat blok ini langsung dari file ini) */
+const SEEK_BACK_TOL = 1;    // mundur lebih dari 1 dtk = seek (selisih kecil berasal dari koreksi jam pemutar iframe)
+const SEEK_FWD_SLACK = 1;   // maju lebih cepat dari waktu nyata (x2,5 + 1 dtk) = seek
+const MAX_RATE = 2.5;       // kecepatan putar maksimum yang masih dianggap pemutaran normal
+const MAX_LINES = 3000, MAX_CHARS = 60000; // sama dengan batas server (HL_MAX_LINES, HL_MAX_CHARS)
+const intervalSeconds = (every) => Math.max(0.5, Number(every) || 3) * 60;
+// SEMUA cue yang tampil dalam rentang [from, to) (cue yang mulai sebelum 'from' tetapi masih tampil ikut dihitung); baris kembar berurutan dibuang.
+function cuesIn(cues, from, to) {
+  const out = []; let last = null;
+  for (const c of cues) {
+    if ((c.end > from || c.start >= from) && c.start < to && c.text !== last) { out.push({ text: c.text }); last = c.text; }
+  }
+  return out;
+}
+// Bila terlalu banyak, ambil baris merata dari awal sampai akhir interval (bukan hanya awal atau akhir).
+function capLines(lines, maxLines, maxChars) {
+  const total = lines.reduce((a, l) => a + l.text.length, 0);
+  const k = Math.min(lines.length, maxLines, total > maxChars ? Math.max(1, Math.floor(lines.length * maxChars / total)) : Infinity);
+  return k >= lines.length ? lines : Array.from({ length: k }, (_, i) => lines[Math.floor(i * lines.length / k)]);
+}
+// Tombol "Highlight words now": interval terakhir sebelum posisi video; bila kosong, interval berikutnya.
+function manualWindow(cues, t, I) {
+  const back = { from: Math.max(0, t - I), to: t };
+  if (cuesIn(cues, back.from, back.to).length) return back;
+  const ahead = { from: t, to: t + I };
+  return cuesIn(cues, ahead.from, ahead.to).length ? ahead : back;
+}
+// Dipanggil tiap 0,5 dtk. tm = { winStart, lastT, lastWall }; t = waktu video (dtk); nowSec = jam dinding (dtk).
+// Mengembalikan 'seek' (interval dihitung ulang dari posisi baru), 'fire' (interval penuh), atau null.
+function stepTimer(tm, t, nowSec, I) {
+  let act = null;
+  if (tm.lastT == null) tm.winStart = t; // tick pertama: interval mulai dari posisi video saat ini
+  else {
+    const dt = t - tm.lastT, wall = nowSec - tm.lastWall;
+    if (dt < -SEEK_BACK_TOL || dt > wall * MAX_RATE + SEEK_FWD_SLACK) { tm.winStart = t; act = 'seek'; }
+  }
+  tm.lastT = t; tm.lastWall = nowSec;
+  if (!act && t - tm.winStart >= I) act = 'fire';
+  return act;
+}
+/* WINDOW-LOGIC-END */
+const tm = { winStart: 0, lastT: null, lastWall: 0 };
+function resetTimer() { tm.winStart = 0; tm.lastT = null; }
+function restartWindow() { let t = 0; try { t = (P && P.time()) || 0; } catch (e) {} tm.winStart = t; tm.lastT = t; tm.lastWall = performance.now() / 1000; }
+// Video yang dijeda (termasuk saat pop-up tampil) tidak maju: waktu video tetap, jadi interval ikut berhenti.
 setInterval(() => {
   if (!P) return;
   let playing = false, t = 0; try { playing = P.playing(); t = P.time() || 0; } catch (e) {}
-  $('toggle').textContent = playing ? '⏸\uFE0E Jeda' : '▶ Putar';
+  $('toggle').textContent = playing ? '⏸\uFE0E Pause' : '▶ Play';
   if (subs) { const c = subs.cues.filter((x) => x.start <= t && x.end >= t)[0]; $('sub').textContent = c ? c.text : ''; }
-  const dt = lastT == null ? 0 : t - lastT; lastT = t;
-  if (!$('sheet').hidden || !subs || busy) return;
-  if (dt > 0 && dt < 2) acc += dt; // lompatan (geser bar) tidak dihitung
-  if (acc >= Math.max(0.5, Number($('every').value) || 3) * 60) highlight();
+  const I = intervalSeconds($('every').value), act = stepTimer(tm, t, performance.now() / 1000, I);
+  if (!$('sheet').hidden || busy) return;
+  if (!subs) { tm.winStart = t; return; } // interval baru dihitung setelah subtitle ada
+  if (act === 'fire') highlight({ from: tm.winStart, to: tm.winStart + I });
 }, 500);
 
 /* ---------- Sorotan kata ---------- */
-function pickLines() {
-  const t = P.time(); let past = subs.cues.filter((c) => c.start <= t).slice(-8);
-  if (!past.length) past = subs.cues.slice(0, 8);
-  return past.map((c) => ({ text: c.text }));
-}
 function openSheet(on) { $('sheet').hidden = !on; if (on) $('again').focus(); }
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 function kanaBox(label, main, sub) { const d = el('div', 'kana'); d.append(el('small', '', label), el('b', '', main)); if (sub) { d.append(el('br'), el('span', '', sub)); } return d; }
@@ -637,30 +674,36 @@ function kanaTable(label, groups) { // groups: [[{k,r},...],...] -> kotak: tulis
 
 function renderCard(j) {
   const c = j.card, body = $('cardBody'); body.replaceChildren();
-  body.append(el('span', 'badge', c.type === 'single' ? 'KATA BARU' : 'FRASA BARU'), el('div', 'big', c.romaji), el('p', 'mean', `${c.meaningId} / ${c.meaningEn}`));
+  body.append(el('span', 'badge', c.type === 'single' ? 'NEW WORD' : 'NEW PHRASE'), el('div', 'big', c.romaji), el('p', 'mean', `${c.meaningId} / ${c.meaningEn}`));
   const ps = c.parts || [];
   if (c.hiragana) body.append(kanaTable('Hiragana', ps.length ? ps.map((p) => moras(p.reading)) : [moras(c.hiragana)]));
   if (c.katakana) body.append(kanaTable('Katakana', ps.length ? ps.map((p) => moras(p.reading)) : [moras(c.katakana)]));
   if (c.kanji) body.append(kanaTable('Kanji', ps.length ? ps.map((p) => (p.kanji ? kanjiCells(p.kanji, p.reading, p.romaji) : moras(p.reading))) : [kanjiCells(c.kanji, c.hiragana || c.katakana || '', c.romaji)]));
-  if (j.viaTranslation) body.append(el('p', 'note', 'ⓘ Subtitle video ini bukan bahasa Jepang, jadi kata dicari lewat terjemahan otomatis dan bisa kurang tepat.'));
+  if (j.viaTranslation) body.append(el('p', 'note', 'ⓘ This video\'s subtitles are not in Japanese, so the words were found through automatic translation and may be less accurate.'));
 }
 function renderMsg(text) { $('cardBody').replaceChildren(el('p', 'note', text)); }
 
-async function highlight() {
+const NO_WORDS_MSG = 'No matching words found in this section. Press PLAY AGAIN to continue the video.';
+// win = { from, to } dalam detik video. Tanpa win (tombol ✨): interval terakhir sebelum posisi video saat ini.
+async function highlight(win) {
   if (!P || busy) return;
-  if (!subs || !subs.cues.length) return status('Belum ada subtitle. Muat video yang punya subtitle atau tempel manual.', true);
-  busy = true; acc = 0; try { P.pause(); } catch (e) {}
-  openSheet(true); renderMsg('⏳ Mencari kata untukmu…');
+  if (!subs || !subs.cues.length) return status('No subtitles yet. Load a video that has subtitles or paste them manually.', true);
+  busy = true; try { P.pause(); } catch (e) {}
+  if (!win) { let t = 0; try { t = P.time() || 0; } catch (e) {} win = manualWindow(subs.cues, t, intervalSeconds($('every').value)); }
+  curWin = win; // NEXT memakai interval yang sama
+  openSheet(true); renderMsg('⏳ Finding words for you…');
+  const lines = capLines(cuesIn(subs.cues, win.from, win.to), MAX_LINES, MAX_CHARS);
+  if (!lines.length) { renderMsg(NO_WORDS_MSG); busy = false; return; } // memang tidak ada subtitle dalam interval ini
   try {
-    const r = await fetch('/api/highlight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: pickLines(), sourceLang: subs.lang, wordCount: Number($('wc').value), exclude: shown.slice(-40) }) });
+    const r = await fetch('/api/highlight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines, sourceLang: subs.lang, wordCount: Number($('wc').value), exclude: shown.slice(-40) }) });
     const j = await r.json();
-    if (j.ok) { shown.push(j.surface); renderCard(j); } else renderMsg(j.message || 'Gagal membuat kartu kata.');
-  } catch (e) { renderMsg('Tidak bisa menghubungi server. Periksa internet lalu tekan NEXT.'); }
+    if (j.ok) { shown.push(j.surface); renderCard(j); } else renderMsg(j.message || 'Failed to create the word card.');
+  } catch (e) { renderMsg('Cannot reach the server. Check your internet, then press NEXT.'); }
   busy = false;
 }
-$('now').onclick = highlight;
-$('next').onclick = highlight;
-$('again').onclick = () => { openSheet(false); acc = 0; if (P) P.play(); };
+$('now').onclick = () => highlight();
+$('next').onclick = () => highlight(curWin);
+$('again').onclick = () => { openSheet(false); restartWindow(); if (P) P.play(); };
 </script>
 </body>
 </html>
