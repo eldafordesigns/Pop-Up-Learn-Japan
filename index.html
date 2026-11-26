@@ -268,18 +268,18 @@ label[for="mh"]{font-size:.546rem}
       </div>
       <div id="mRun" hidden>
         <div class="seek" style="margin-top:0"><span id="mcur">0:00</span><input id="mbar" type="range" min="0" max="1" step="1" value="0" aria-label="Subtitle timeline position"><span id="mtot">0:00</span></div>
-        <div class="mctl"><button id="mback" type="button" class="alt" aria-label="Back 10 seconds on the subtitle timeline">&lt; 10 sec</button><button id="mpause" type="button">❚❚ Pause subtitles</button><button id="mfwd" type="button" class="alt" aria-label="Forward 10 seconds on the subtitle timeline">10 sec &gt;</button></div>
-        <p class="mnote">This timeline only controls the subtitles and the Highlight Words timing. It does NOT control the external video, so match the two positions yourself.</p>
+        <div class="mctl"><button id="mback" type="button" class="alt" aria-label="Back 10 seconds on the subtitle timeline">&lt; 10 sec</button><button id="mpause" type="button" class="alt">❚❚ Pause subtitles</button><button id="mfwd" type="button" class="alt" aria-label="Forward 10 seconds on the subtitle timeline">10 sec &gt;</button></div>
+        <p class="mnote">This timeline only controls the subtitles and the Pop the Words timing. It does NOT control the external video, so match the two positions yourself.</p>
         <button id="mreset" type="button" class="alt" style="width:100%;margin-top:10px;min-height:44px;font-size:.8rem">Change duration / restart timeline</button>
       </div>
       <p id="mmsg" class="status" role="status"></p>
     </section>
     <div class="card">
       <div class="set">
-        <div><label for="every">Highlight interval (minutes)</label><div class="stepper"><button id="evDec" type="button" class="alt" aria-label="Decrease interval">−</button><input id="every" type="number" min="0.5" max="60" step="0.5" value="3" inputmode="decimal"><button id="evInc" type="button" class="alt" aria-label="Increase interval">+</button></div></div>
+        <div><label for="every">Words interval (minutes)</label><div class="stepper"><button id="evDec" type="button" class="alt" aria-label="Decrease interval">−</button><input id="every" type="number" min="0.5" max="60" step="0.5" value="3" inputmode="decimal"><button id="evInc" type="button" class="alt" aria-label="Increase interval">+</button></div></div>
         <div><label for="wc">Words per highlight</label><select id="wc"><option value="1">1 word</option><option value="2">2 words</option><option value="3">3 words</option></select></div>
       </div>
-      <button id="now" style="width:100%;margin-top:14px">✨ Highlight words now</button>
+      <button id="now" style="width:100%;margin-top:14px">✨ Pop the Words now</button>
       <p id="sub" class="sub"></p>
     </div>
   </section>
@@ -412,7 +412,7 @@ function listenFrame(frame, origin, fn) {
   const h = (e) => { if (e.source === frame.contentWindow && e.origin === origin && e.data) fn(e.data); };
   addEventListener('message', h); return () => removeEventListener('message', h);
 }
-function embedStatus(name) { status(`✅ ${name} connected: automatic pause & resume is active.` + (subs ? ` ${subs.cues.length} subtitle lines in use.` : ' Paste a Japanese .srt/.vtt subtitle below so word highlights can work.')); }
+function embedStatus(name) { status(`✅ ${name} connected: automatic pause & resume is active.` + (subs ? ` ${subs.cues.length} subtitle lines in use.` : ' Paste a Japanese .srt/.vtt subtitle below so Pop the Words can work.')); }
 
 /* AnimeEmbed: event lewat postMessage (channel "animeembed", versi 1), perintah lewat SDK resmi mereka. */
 let aeSdk = null;
@@ -544,7 +544,7 @@ $('load').onclick = async () => {
       P = await mountYouTube(id);
       await getSubs(raw);
     } else if (/\.(mp4|webm|mov)(\?|#|$)/i.test(raw)) {
-      P = mountVideo(raw); $('stage').hidden = false; status('Video loaded. Paste the subtitles manually below so word highlights can work.'); $('pasteBox').open = true;
+      P = mountVideo(raw); $('stage').hidden = false; status('Video loaded. Paste the subtitles manually below so Pop the Words can work.'); $('pasteBox').open = true;
     } else {
       const emb = classifyEmbed(raw);
       if (emb) { await loadEmbed(emb); if (P && seq === loadSeq) await getPageSubs(raw, seq); }
@@ -616,7 +616,7 @@ function capLines(lines, maxLines, maxChars) {
   const k = Math.min(lines.length, maxLines, total > maxChars ? Math.max(1, Math.floor(lines.length * maxChars / total)) : Infinity);
   return k >= lines.length ? lines : Array.from({ length: k }, (_, i) => lines[Math.floor(i * lines.length / k)]);
 }
-// Tombol "Highlight words now": interval terakhir sebelum posisi video; bila kosong, interval berikutnya.
+// Tombol "Pop the Words now": interval terakhir sebelum posisi video; bila kosong, interval berikutnya.
 function manualWindow(cues, t, I) {
   const back = { from: Math.max(0, t - I), to: t };
   if (cuesIn(cues, back.from, back.to).length) return back;
@@ -682,7 +682,7 @@ function mReset(hide) {
   $('mSetup').hidden = false; $('mRun').hidden = true; mMsg('');
   if (hide) $('manual').hidden = true;
 }
-function mSeekTo(t) { // geser timeline: jam dan interval Highlight Words langsung mengikuti posisi baru
+function mSeekTo(t) { // geser timeline: jam dan interval Pop the Words langsung mengikuti posisi baru
   const now = performance.now(); mSet(mn.clock, t, now);
   const p = mNow(); tm.winStart = p; tm.lastT = p; tm.lastWall = now / 1000;
   if (!$('sheet').hidden && curWin) curWin = { from: p, to: p };
