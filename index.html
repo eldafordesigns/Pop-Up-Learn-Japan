@@ -647,11 +647,52 @@ function moras(str) { // "らやまは" -> [{k:'ら',r:'ra'},...]; ゃゅょ & �
 }
 const toHira = (c) => c.replace(/[\u30A1-\u30F6]/g, (x) => String.fromCharCode(x.charCodeAt(0) - 0x60));
 const isKana = (ch) => /[\u3041-\u3096\u30A1-\u30F6\u30FC]/.test(ch);
-function kanjiCells(kanji, reading, fallbackRomaji) { // -> [{k,r},...]: tiap kanji / huruf kana punya kotak sendiri + ejaannya
+const NOSTART = new Set([...'ゃゅょぁぃぅぇぉゎっー']); // batas antar-kanji tidak boleh jatuh sebelum huruf kecil / っ / ー
+const VOICED = 'がぎぐげござじずぜぞだぢづでどばびぶべぼぱぴぷぺぽ', PLAIN = 'かきくけこさしすせそたちつてとはひふへほはひふへほ';
+const unvoice = (c) => { const i = VOICED.indexOf(c); return i < 0 ? c : PLAIN[i]; };
+function hintScore(seg, hint) { // seberapa mirip potongan bacaan dengan bacaan tunggal kanji itu (dakuten awal & っ diperhitungkan)
+  const a = [...seg], b = [...hint];
+  if (!b.length) return -0.1 * Math.abs(a.length - 2);
+  let s = 0;
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    const x = i ? a[i] : unvoice(a[i]), y = i ? b[i] : unvoice(b[i]);
+    if (x === y) s++;
+    else { if (a[i] === 'っ' && 'くきつち'.includes(b[i])) s += 0.5; break; }
+  }
+  return s - 0.1 * Math.abs(a.length - b.length);
+}
+function cutKanji(n, rd, hints, off) { // bagi bacaan 'rd' menjadi n potongan (satu per kanji); null bila tidak mungkin
+  const L = [...rd];
+  if (n < 1 || L.length < n) return null;
+  if (n === 1) return [rd];
+  const memo = new Map();
+  const go = (i, p) => {
+    if (i === n) return p === L.length ? { s: 0, cuts: [] } : null;
+    const key = i * 100 + p; if (memo.has(key)) return memo.get(key);
+    let best = null;
+    for (let e = p + 1; e <= L.length - (n - i - 1); e++) {
+      if (i === n - 1 && e !== L.length) continue;
+      if (i < n - 1 && NOSTART.has(L[e])) continue;
+      const rest = go(i + 1, e); if (!rest) continue;
+      const seg = L.slice(p, e).join(''), s = hintScore(seg, hints[off + i] || '') + rest.s;
+      if (!best || s > best.s) best = { s, cuts: [seg, ...rest.cuts] };
+    }
+    memo.set(key, best); return best;
+  };
+  const r = go(0, 0); return r ? r.cuts : null;
+}
+function cutRomaji(cuts) { // ejaan tiap potongan; っ di ujung potongan menggandakan huruf pertama potongan berikutnya (gak|kou)
+  const r = cuts.map((c) => moras(c).map((m) => m.r).join(''));
+  cuts.forEach((c, i) => { if (c.endsWith('っ') && r[i + 1]) r[i] += r[i + 1].startsWith('ch') ? 't' : r[i + 1][0]; });
+  return r;
+}
+function kanjiCells(kanji, reading, fallbackRomaji, hints) { // -> [{k,r},...]: tiap kanji / huruf kana punya kotak sendiri + ejaannya
   const ks = [...String(kanji || '')], rd = toHira(String(reading || ''));
   const whole = () => [{ k: String(kanji || ''), r: String(fallbackRomaji || '').toLowerCase() }];
   if (!ks.length) return whole();
   if (ks.every(isKana)) return moras(ks.join(''));
+  const nk = ks.filter((c) => !isKana(c)).length;
+  hints = Array.isArray(hints) && hints.length === nk ? hints : []; let hq = 0;
   const runs = [];
   ks.forEach((c) => { const kana = isKana(c), L = runs[runs.length - 1]; if (L && L.kana === kana) L.s += c; else runs.push({ kana, s: c }); });
   const out = []; let ri = 0;
@@ -662,7 +703,11 @@ function kanjiCells(kanji, reading, fallbackRomaji) { // -> [{k,r},...]: tiap ka
     if (!nx) end = rd.length;
     else { const s = toHira(nx.s); end = i + 2 >= runs.length ? (rd.endsWith(s) ? rd.length - s.length : -1) : rd.indexOf(s, ri + 1); }
     if (end <= ri) return whole();
-    out.push({ k: R.s, r: moras(rd.slice(ri, end)).map((m) => m.r).join('') }); ri = end;
+    const rr = rd.slice(ri, end), chars = [...R.s], cuts = cutKanji(chars.length, rr, hints, hq);
+    hq += chars.length;
+    if (cuts) { const rom = cutRomaji(cuts); chars.forEach((ch, j) => out.push({ k: ch, r: rom[j] })); }
+    else out.push({ k: R.s, r: moras(rr).map((m) => m.r).join('') });
+    ri = end;
   }
   return ri === rd.length ? out : whole();
 }
@@ -678,7 +723,7 @@ function renderCard(j) {
   const ps = c.parts || [];
   if (c.hiragana) body.append(kanaTable('Hiragana', ps.length ? ps.map((p) => moras(p.reading)) : [moras(c.hiragana)]));
   if (c.katakana) body.append(kanaTable('Katakana', ps.length ? ps.map((p) => moras(p.reading)) : [moras(c.katakana)]));
-  if (c.kanji) body.append(kanaTable('Kanji', ps.length ? ps.map((p) => (p.kanji ? kanjiCells(p.kanji, p.reading, p.romaji) : moras(p.reading))) : [kanjiCells(c.kanji, c.hiragana || c.katakana || '', c.romaji)]));
+  if (c.kanji) body.append(kanaTable('Kanji', ps.length ? ps.map((p) => (p.kanji ? kanjiCells(p.kanji, p.reading, p.romaji, p.hints) : moras(p.reading))) : [kanjiCells(c.kanji, c.hiragana || c.katakana || '', c.romaji)]));
   if (j.viaTranslation) body.append(el('p', 'note', 'ⓘ This video\'s subtitles are not in Japanese, so the words were found through automatic translation and may be less accurate.'));
 }
 function renderMsg(text) { $('cardBody').replaceChildren(el('p', 'note', text)); }
