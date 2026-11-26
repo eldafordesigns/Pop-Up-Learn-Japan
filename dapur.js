@@ -15,6 +15,8 @@ const HL_MAX_LINES = 3000;   // semua cue dalam satu interval (interval maksimum
 const HL_MAX_CHARS = 60000;  // total huruf yang dianalisis per permintaan; di atas ini cue dipilih merata dari seluruh interval
 const HL_BODY_MAX = 700000;  // batas ukuran badan permintaan /api/highlight (byte)
 const TR_ENC_MAX = 3500;     // panjang maksimum satu potongan teks (setelah di-encode URL) untuk layanan terjemahan GET
+const HL_BATCH = 3;          // jumlah kandidat yang diterjemahkan serentak dalam satu putaran (subtitle non-Jepang)
+const HL_ROUNDS = 3;         // putaran maksimum per permintaan; kandidat yang tidak bisa diverifikasi dilewati lalu dicatat
 const TR_MAX_CHUNKS = 6;     // jumlah potongan terjemahan maksimum per sorotan; bila lebih, potongan dipilih merata
 const YT_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be', 'music.youtube.com']);
 
@@ -26,6 +28,8 @@ const MSG = {
   UPSTREAM: 'Failed to retrieve subtitles from YouTube. Try again later, choose another video, or paste the subtitles manually.',
   BAD_INPUT: 'The data sent is incomplete or invalid.',
   NO_WORDS: 'No matching words found in this section. Press PLAY AGAIN to continue the video.',
+  NO_MORE_WORDS: 'You have seen all the words in this section. Press PLAY AGAIN to continue the video.',
+  NOT_VERIFIED: 'No Japanese equivalent could be verified for the words tried this time. Press NEXT to try other words.',
   TRANSLATE_FAIL: 'The translation service is busy. Press NEXT to try again.',
   BOT_BLOCK: 'YouTube refused to provide subtitles to this server (the server was treated as a bot). Use "Paste manually" below: upload or paste a .srt/.vtt subtitle file.',
   QUOTA: 'This month\'s subtitle service quota has been used up. Use "Paste manually" below, or try again next month.',
@@ -570,7 +574,7 @@ function cleanInput(b) {
   const lang = String(b.sourceLang || '');
   if (!lines.length || !/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$/.test(lang)) return { error: true };
   const wordCount = Math.min(3, Math.max(1, Math.round(Number(b.wordCount) || 1)));
-  const exclude = (Array.isArray(b.exclude) ? b.exclude : []).slice(0, 50).map((x) => cleanText(x).slice(0, 40)).filter(Boolean);
+  const exclude = (Array.isArray(b.exclude) ? b.exclude : []).slice(0, 400).map((x) => cleanText(x).slice(0, 80)).filter(Boolean); // riwayat SATU interval (dikelola klien per interval)
   return { lines, lang, wordCount, exclude };
 }
 
@@ -591,14 +595,106 @@ function segmentPools(tokenize, segments, n) {
   return pools;
 }
 
-// Kata yang sudah tampil dihindari selama masih ada alternatif; baru dipakai ulang bila tidak ada kata lain sama sekali.
+// Kunci pembanding: huruf besar/kecil, tanda baca, apostrof, lebar huruf (NFKC), dan (bahasa Inggris) bentuk jamak diseragamkan,
+// sehingga "Things", "things," dan "thing" dianggap kata yang sama.
+function foldKey(s, lang = '') {
+  const en = String(lang).split('-')[0].toLowerCase() === 'en';
+  return (String(s).normalize('NFKC').toLowerCase().replace(/['\u2019\u2018`\u00b4]/g, '').match(/[\p{L}\p{M}\p{N}]+/gu) || [])
+    .map((w) => (en && w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w)).join(' ');
+}
+
+// Kata yang sudah tampil TIDAK dipakai ulang. Bila semua kandidat sudah tampil, hasilnya null (pemanggil menampilkan pesan "sudah habis").
 function pickFromPools(pools, exclude = [], rand = Math.random) {
-  const skip = new Set(exclude);
-  const fresh = pools.map((p) => p.filter((c) => !skip.has(c.surface))).filter((p) => p.length);
-  const from = fresh.length ? fresh : pools;
-  if (!from.length) return null;
-  const seg = from[Math.floor(rand() * from.length)];
+  const skip = new Set(exclude.map((x) => foldKey(x, 'ja')));
+  const fresh = pools.map((p) => p.filter((c) => !skip.has(foldKey(c.surface, 'ja')))).filter((p) => p.length);
+  if (!fresh.length) return null;
+  const seg = fresh[Math.floor(rand() * fresh.length)];
   return seg[Math.floor(rand() * seg.length)];
+}
+
+// ---------- Kandidat dari teks sumber (subtitle bukan Jepang) ----------
+// Semua kata/frasa diambil dari SELURUH subtitle interval, tanpa bergantung pada kamus: padanan Jepangnya dicari belakangan lewat
+// layanan terjemahan, lalu dibaca dengan kuromoji. Daftar kata fungsi di bawah hanya mengatur URUTAN PRIORITAS (kata isi lebih dulu), bukan kandidat.
+const STOP_WORDS = {
+  en: new Set(("a an the and or but nor so if of to in on at by for with from as into than then that this these those there here it its it's i me my we us our you your he him his she her they them their " +
+    "am is are was were be been being i'm i've i'll i'd you're you've you'll you'd he's he'll she's she'll we're we've we'll they're they've they'll it'll that's there's here's what's who's let's " +
+    "do does did don't doesn't didn't have has had will would shall should can could may might must can't won't wouldn't couldn't shouldn't isn't aren't wasn't weren't hasn't haven't hadn't " +
+    "not no yes oh uh um ah what who whom whose which where when why how all any some just very too also only about over off").split(' ')),
+  id: new Set('yang dan atau tetapi tapi di ke dari untuk dengan pada dalam ini itu saya aku kamu anda dia ia kami kita mereka adalah ialah akan sudah telah sedang belum tidak bukan juga saja lagi ada ya oh nah dong kok sih lah pun karena jika kalau agar supaya bahwa sebuah seorang para si sang'.split(' ')),
+};
+const NOSPACE_LANGS = new Set(['zh', 'yue', 'th', 'km', 'lo', 'my']); // bahasa tanpa spasi antarkata: dipecah dengan Intl.Segmenter
+
+function wordSpans(text, lang) { // -> [{w, s, e}] (kata beserta posisinya)
+  const out = [], base = String(lang).split('-')[0].toLowerCase();
+  if (NOSPACE_LANGS.has(base) && typeof Intl !== 'undefined' && Intl.Segmenter) {
+    try { for (const g of new Intl.Segmenter(lang, { granularity: 'word' }).segment(text)) if (g.isWordLike) out.push({ w: g.segment, s: g.index, e: g.index + g.segment.length }); return out; } catch { out.length = 0; }
+  }
+  const re = /[\p{L}\p{M}\p{N}]+(?:['\u2019\-][\p{L}\p{M}\p{N}]+)*/gu; let m;
+  while ((m = re.exec(text))) out.push({ w: m[0], s: m.index, e: m.index + m[0].length });
+  return out;
+}
+
+// -> pools: satu kumpulan kandidat per baris subtitle; kandidat: { phrase, key, tier } (tier 1 = diutamakan, 2 = cadangan).
+// Frasa n kata hanya dibentuk dari kata yang berurutan DALAM SATU klausa (tidak melewati koma/titik/baris), tidak memuat angka atau nama diri,
+// berakhir pada kata isi, dan memuat minimal satu kata isi (dua kata fungsi seperti "I am" tidak pernah menjadi frasa).
+function sourcePools(lines, lang, n) {
+  const base = String(lang).split('-')[0].toLowerCase(), spaced = !NOSPACE_LANGS.has(base), join = spaced ? ' ' : '';
+  const stop = STOP_WORDS[base] || null, minLen = spaced ? 2 : 1;
+  const norm = (w) => w.toLowerCase().replace(/[\u2019\u2018`\u00b4]/g, "'");
+  const seen = new Set(), pools = [];
+  for (const line of lines) {
+    const text = String(line), sp = wordSpans(text, lang);
+    if (!sp.length) continue;
+    const upper = sp.filter((x) => /^\p{Lu}/u.test(x.w)).length, titleCase = sp.length >= 4 && upper / sp.length >= 0.8; // baris berhuruf kapital di tiap kata: huruf besar tidak menandai nama
+    const gap = (i) => (i ? text.slice(sp[i - 1].e, sp[i].s) : '');
+    const info = sp.map((x, i) => {
+      const g = gap(i), len = [...x.w].length;
+      return {
+        w: x.w, brk: i > 0 && /\S/.test(g),
+        skip: /\p{N}/u.test(x.w) || len < minLen || (spaced && !titleCase && i > 0 && !/[.!?\u2026\u3002\uff01\uff1f]/.test(g) && /^\p{Lu}\p{Ll}/u.test(x.w)), // angka, huruf tunggal, nama diri (kapital di tengah kalimat)
+        weak: stop ? stop.has(norm(x.w)) : (spaced && len <= 2),
+      };
+    });
+    const pool = [];
+    for (let i = 0; i + n <= info.length; i++) {
+      const w = info.slice(i, i + n);
+      if (w.some((x, j) => x.skip || (j > 0 && x.brk))) continue;
+      const strong = w.filter((x) => !x.weak).length;
+      if (n > 1 && (w[n - 1].weak || !strong)) continue; // frasa: harus berakhir pada kata isi (1 kata: kata fungsi tetap boleh, tetapi tier 2)
+      const phrase = w.map((x) => x.w.toLowerCase()).join(join), key = foldKey(phrase, lang);
+      if (!key || seen.has(key)) continue;
+      seen.add(key); pool.push({ phrase, key, tier: strong === n ? 1 : 2 });
+    }
+    if (pool.length) pools.push(pool);
+  }
+  return pools;
+}
+
+// Mengambil sampai k kandidat BERBEDA yang belum pernah ditampilkan/dilewati: tier terbaik dulu; di dalam tier, baris dipilih acak lalu kandidatnya acak.
+function drawSourceBatch(pools, skip, k, rand = Math.random) {
+  const taken = new Set(), out = [];
+  while (out.length < k) {
+    const avail = pools.map((p) => p.filter((c) => !skip.has(c.key) && !taken.has(c.key))).filter((p) => p.length);
+    if (!avail.length) break;
+    const tier = Math.min(...avail.map((p) => Math.min(...p.map((c) => c.tier))));
+    const top = avail.map((p) => p.filter((c) => c.tier === tier)).filter((p) => p.length);
+    const seg = top[Math.floor(rand() * top.length)], c = seg[Math.floor(rand() * seg.length)];
+    taken.add(c.key); out.push(c);
+  }
+  return out;
+}
+
+// Memverifikasi hasil terjemahan Jepang: harus benar-benar tulisan Jepang yang bisa dibaca kuromoji (semua bagian punya bacaan). Tidak ada yang dikarang.
+function japaneseParts(ja, tokenize, source) {
+  const text = cleanText(ja);
+  if (!text || text.length > 40 || !/[\u3040-\u30FF\u4E00-\u9FFF\u3005]/.test(text) || text.toLowerCase() === String(source).toLowerCase()) return null;
+  let toks; try { toks = (tokenize(text) || []).filter((t) => t.pos !== '記号'); } catch { return null; }
+  if (!toks.length || toks.length > 6) return null;
+  toks = toks.map((t) => ({ ...t, reading: t.reading && t.reading !== '*' ? t.reading : (isKatakanaOnly(t.surface_form) ? t.surface_form : '') })); // kata katakana asing: bacaannya = tulisannya
+  if (toks.some((t) => !t.reading || !/[\u3040-\u30FF\u4E00-\u9FFF\u3005]/.test(t.surface_form))) return null;
+  const parts = partsOf(toks);
+  if (parts.some((p) => !p.reading || !p.romaji)) return null;
+  return { surface: toks.map((t) => t.surface_form).join(''), parts };
 }
 
 // Teks non-Jepang diterjemahkan per potongan (URL layanan terjemahan ada batas panjangnya).
@@ -717,21 +813,47 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
         if (inp.error) return fail(400, 'BAD_INPUT');
 
         let tokenize; try { tokenize = await getTokenizer(); } catch { return fail(503, 'NO_TOKENIZER'); }
-        let japanese = inp.lines.join('\n'), viaTranslation = false;
-        if (inp.lang !== 'ja' && !inp.lang.startsWith('ja-')) { // bukan Jepang: terjemahkan dulu ke Jepang (per potongan, paralel)
-          const sl = inp.lang.split('-')[0];
-          const done = (await Promise.allSettled(translationChunks(inp.lines).map((c) => translate(fetchImpl, cache, c, sl, 'ja')))).filter((r) => r.status === 'fulfilled').map((r) => r.value);
-          if (!done.length) return fail(502, 'TRANSLATE_FAIL');
-          japanese = done.join('\n'); viaTranslation = true;
+        const isJa = inp.lang === 'ja' || inp.lang.startsWith('ja-');
+        if (isJa) { // subtitle Jepang: kata dipecah kuromoji; yang sudah tampil di interval ini tidak muncul lagi
+          const pools = segmentPools(tokenize, splitSegments(inp.lines.join('\n')), inp.wordCount);
+          if (!pools.length) return fail(200, 'NO_WORDS'); // memang tidak ada kata
+          const pick = pickFromPools(pools, inp.exclude);
+          if (!pick) return fail(200, 'NO_MORE_WORDS');   // semua kata unik interval ini sudah tampil
+          let id, en;
+          try { [id, en] = await Promise.all([translate(fetchImpl, cache, pick.surface, 'ja', 'id'), translate(fetchImpl, cache, pick.surface, 'ja', 'en')]); } catch { return fail(502, 'TRANSLATE_FAIL'); }
+          const parts = partsOf(pick.w);
+          const card = buildCard({ romaji: parts.map((p) => p.romaji).join(' '), meaning_id: id, meaning_en: en, parts }, inp.wordCount);
+          return card ? send(200, { ok: true, card, surface: pick.surface, viaTranslation: false }) : fail(502, 'NO_WORDS');
         }
-        const pools = segmentPools(tokenize, splitSegments(japanese), inp.wordCount);
-        const pick = pickFromPools(pools, inp.exclude);
-        if (!pick) return fail(200, 'NO_WORDS');
-        let id, en;
-        try { [id, en] = await Promise.all([translate(fetchImpl, cache, pick.surface, 'ja', 'id'), translate(fetchImpl, cache, pick.surface, 'ja', 'en')]); } catch { return fail(502, 'TRANSLATE_FAIL'); }
-        const parts = partsOf(pick.w);
-        const card = buildCard({ romaji: parts.map((p) => p.romaji).join(' '), meaning_id: id, meaning_en: en, parts }, inp.wordCount);
-        return card ? send(200, { ok: true, card, surface: pick.surface, viaTranslation }) : fail(502, 'NO_WORDS');
+        // Subtitle bukan Jepang: kandidat = kata/frasa dari SELURUH teks interval; padanan Jepangnya dicari per kandidat lewat terjemahan lalu diverifikasi kuromoji.
+        const sl = inp.lang.split('-')[0], base = sl.toLowerCase();
+        const pools = sourcePools(inp.lines, inp.lang, inp.wordCount);
+        if (!pools.length) return fail(200, 'NO_WORDS');
+        const skip = new Set(inp.exclude.map((x) => foldKey(x, sl))); // riwayat interval ini (kata sumber + tulisan Jepangnya) + kandidat yang gagal diverifikasi
+        const skipped = [];
+        for (let round = 0; round < HL_ROUNDS; round++) {
+          const batch = drawSourceBatch(pools, skip, HL_BATCH);
+          if (!batch.length) break;
+          const res = await Promise.allSettled(batch.map((c) => translate(fetchImpl, cache, c.phrase, sl, 'ja')));
+          if (res.every((r) => r.status === 'rejected')) return fail(502, 'TRANSLATE_FAIL'); // layanan terjemahan sibuk: bukan salah kandidat, tidak dicatat
+          for (let i = 0; i < batch.length; i++) {
+            const c = batch[i], r = res[i];
+            skip.add(c.key);
+            if (r.status === 'rejected') continue; // gagal jaringan: boleh dicoba lagi di NEXT berikutnya (tidak dicatat)
+            const jp = japaneseParts(r.value, tokenize, c.phrase);
+            const jk = jp && foldKey(jp.surface, sl);
+            if (!jp || skip.has(jk)) { skipped.push(c.key); continue; } // tidak terverifikasi / padanannya sudah pernah tampil: lewati, jangan dibuang diam-diam, catat agar tidak dicoba ulang
+            let id, en;
+            try { [id, en] = await Promise.all([base === 'id' ? c.phrase : translate(fetchImpl, cache, c.phrase, sl, 'id'), base === 'en' ? c.phrase : translate(fetchImpl, cache, c.phrase, sl, 'en')]); } catch { return fail(502, 'TRANSLATE_FAIL'); }
+            const card = buildCard({ romaji: jp.parts.map((p) => p.romaji).join(' '), meaning_id: id, meaning_en: en, parts: jp.parts }, jp.parts.length);
+            if (!card) { skipped.push(c.key); continue; }
+            card.type = inp.wordCount === 1 ? 'single' : 'phrase'; // jenis kartu mengikuti pilihan "1 word / 2 words"
+            return send(200, { ok: true, card, surface: jp.surface, key: c.key, skipped, viaTranslation: true });
+          }
+        }
+        const more = drawSourceBatch(pools, skip, 1).length > 0;
+        const code = more ? 'NOT_VERIFIED' : 'NO_MORE_WORDS';
+        return send(200, { ok: false, code, message: MSG[code], skipped });
       }
 
       return send(['GET', 'POST'].includes(req.method) ? 404 : 405, { ok: false, message: 'Not found.' });
@@ -741,7 +863,7 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
   });
 }
 
-module.exports = { fetchPageSubtitles, scanTracks, scanFrames, rankCandidates, langOf, isPrivateIp, assertPublicUrl, createServer, fetchViaSupadata, parseXml, parseVtt, parseCaption, extractPlayerResponse, orderTracks, fetchSubtitles, extractVideoId, parseJson3, pickTrack, captionUrl, cleanText, buildCard, cleanInput, toRomaji, toHiragana, candidates, partsOf, splitSegments, segmentPools, pickFromPools, translationChunks, sampleEvenly };
+module.exports = { fetchPageSubtitles, scanTracks, scanFrames, rankCandidates, langOf, isPrivateIp, assertPublicUrl, createServer, fetchViaSupadata, parseXml, parseVtt, parseCaption, extractPlayerResponse, orderTracks, fetchSubtitles, extractVideoId, parseJson3, pickTrack, captionUrl, cleanText, buildCard, cleanInput, toRomaji, toHiragana, candidates, partsOf, splitSegments, segmentPools, pickFromPools, translationChunks, sampleEvenly, foldKey, sourcePools, drawSourceBatch, japaneseParts };
 
 if (require.main === module) {
   createServer().listen(PORT, () => {
