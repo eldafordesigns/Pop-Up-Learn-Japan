@@ -502,10 +502,29 @@ function candidates(tokens, n, exclude) {
   return out;
 }
 
-function partsOf(w) {
+const KANJI_CH = /[\u4E00-\u9FFF\u3005]/;
+function kanjiHints(surface, tokenize) { // bacaan hiragana tiap huruf kanji (diambil dari kuromoji), urut sesuai tulisan
+  const out = [];
+  for (const ch of [...String(surface || '')]) {
+    if (!KANJI_CH.test(ch)) continue;
+    if (ch === '\u3005') { out.push(out.length ? out[out.length - 1] : ''); continue; }
+    let h = '';
+    try { const t = tokenize(ch) || []; if (t.length === 1 && t[0].reading && t[0].reading !== '*') h = toHiragana(t[0].reading); } catch { h = ''; }
+    out.push(h);
+  }
+  return out;
+}
+
+function partsOf(w, tokenize) {
   return w.map((t) => {
     const kata = isKatakanaOnly(t.surface_form);
-    return { reading: kata ? t.surface_form : toHiragana(t.reading), kanji: hasKanji(t.surface_form) ? t.surface_form : null, romaji: toRomaji(t.reading), is_katakana: kata };
+    return {
+      reading: kata ? t.surface_form : toHiragana(t.reading),
+      kanji: hasKanji(t.surface_form) ? t.surface_form : null,
+      romaji: toRomaji(t.reading),
+      is_katakana: kata,
+      hints: tokenize && hasKanji(t.surface_form) ? kanjiHints(t.surface_form, tokenize) : [],
+    };
   });
 }
 
@@ -536,7 +555,10 @@ async function translate(fetchImpl, cache, text, sl, tl) {
 function buildCard(ai, wordCount) {
   if (!ai || !Array.isArray(ai.parts) || ai.parts.length !== wordCount) return null;
   const s = (v, n = 80) => cleanText(v).slice(0, n);
-  const parts = ai.parts.map((p) => ({ reading: s(p && p.reading, 40), kanji: p && p.kanji ? s(p.kanji, 40) : null, romaji: s(p && p.romaji, 40), isKatakana: !!(p && p.is_katakana === true) }));
+  const parts = ai.parts.map((p) => ({
+    reading: s(p && p.reading, 40), kanji: p && p.kanji ? s(p.kanji, 40) : null, romaji: s(p && p.romaji, 40), isKatakana: !!(p && p.is_katakana === true),
+    hints: Array.isArray(p && p.hints) ? p.hints.slice(0, 20).map((h) => { const x = s(h, 12); return /^[\u3041-\u3096]+$/.test(x) ? x : ''; }) : [],
+  }));
   if (parts.some((p) => !p.reading || !p.romaji)) return null;
   const meaningId = s(ai.meaning_id), meaningEn = s(ai.meaning_en);
   if (!meaningId || !meaningEn) return null;
@@ -692,7 +714,7 @@ function japaneseParts(ja, tokenize, source) {
   if (!toks.length || toks.length > 6) return null;
   toks = toks.map((t) => ({ ...t, reading: t.reading && t.reading !== '*' ? t.reading : (isKatakanaOnly(t.surface_form) ? t.surface_form : '') })); // kata katakana asing: bacaannya = tulisannya
   if (toks.some((t) => !t.reading || !/[\u3040-\u30FF\u4E00-\u9FFF\u3005]/.test(t.surface_form))) return null;
-  const parts = partsOf(toks);
+  const parts = partsOf(toks, tokenize);
   if (parts.some((p) => !p.reading || !p.romaji)) return null;
   return { surface: toks.map((t) => t.surface_form).join(''), parts };
 }
@@ -821,7 +843,7 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
           if (!pick) return fail(200, 'NO_MORE_WORDS');   // semua kata unik interval ini sudah tampil
           let id, en;
           try { [id, en] = await Promise.all([translate(fetchImpl, cache, pick.surface, 'ja', 'id'), translate(fetchImpl, cache, pick.surface, 'ja', 'en')]); } catch { return fail(502, 'TRANSLATE_FAIL'); }
-          const parts = partsOf(pick.w);
+          const parts = partsOf(pick.w, tokenize);
           const card = buildCard({ romaji: parts.map((p) => p.romaji).join(' '), meaning_id: id, meaning_en: en, parts }, inp.wordCount);
           return card ? send(200, { ok: true, card, surface: pick.surface, viaTranslation: false }) : fail(502, 'NO_WORDS');
         }
