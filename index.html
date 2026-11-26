@@ -265,7 +265,7 @@ details[open] summary::after{transform:rotate(45deg)}
 <script>
 'use strict';
 const $ = (id) => document.getElementById(id);
-let P = null, subs = null, busy = false, shown = [], ytLoading = null, curWin = null;
+let P = null, subs = null, busy = false, shown = [], shownKey = null, ytLoading = null, curWin = null; // shown = riwayat kata HANYA untuk interval aktif (shownKey)
 
 /* ---------- Efek paralaks latar (hanya tampilan) ---------- */
 (function () {
@@ -691,13 +691,15 @@ async function highlight(win) {
   busy = true; try { P.pause(); } catch (e) {}
   if (!win) { let t = 0; try { t = P.time() || 0; } catch (e) {} win = manualWindow(subs.cues, t, intervalSeconds($('every').value)); }
   curWin = win; // NEXT memakai interval yang sama
+  const wk = win.from + '|' + win.to; if (wk !== shownKey) { shown = []; shownKey = wk; } // interval baru / seek: riwayat kata interval sebelumnya tidak ikut
   openSheet(true); renderMsg('⏳ Finding words for you…');
   const lines = capLines(cuesIn(subs.cues, win.from, win.to), MAX_LINES, MAX_CHARS);
   if (!lines.length) { renderMsg(NO_WORDS_MSG); busy = false; return; } // memang tidak ada subtitle dalam interval ini
   try {
-    const r = await fetch('/api/highlight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines, sourceLang: subs.lang, wordCount: Number($('wc').value), exclude: shown.slice(-40) }) });
+    const r = await fetch('/api/highlight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines, sourceLang: subs.lang, wordCount: Number($('wc').value), exclude: shown.slice(-400) }) });
     const j = await r.json();
-    if (j.ok) { shown.push(j.surface); renderCard(j); } else renderMsg(j.message || 'Failed to create the word card.');
+    if (Array.isArray(j.skipped)) shown.push(...j.skipped); // kandidat yang tidak bisa diverifikasi: jangan dicoba lagi di interval ini
+    if (j.ok) { shown.push(j.surface); if (j.key) shown.push(j.key); renderCard(j); } else renderMsg(j.message || 'Failed to create the word card.');
   } catch (e) { renderMsg('Cannot reach the server. Check your internet, then press NEXT.'); }
   busy = false;
 }
