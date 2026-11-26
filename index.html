@@ -242,11 +242,11 @@ label[for="mh"]{font-size:.546rem}
     <p id="status" class="status" role="status"></p>
     <details id="pasteBox"><summary>Subtitle not detected? Paste manually</summary>
       <p class="status" style="margin:6px 0 8px;font-size:.72rem">Open the subtitle downloader site&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;download the .srt/.vtt file&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;choose file in the box below&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;select the subtitle language&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;click APPLY</p>
-      <div class="row" style="margin-bottom:6px"><button id="openDown" type="button" class="alt" style="flex:1">Open DownSub</button><button id="openSave" type="button" class="alt" style="flex:1">Open SaveSubs</button></div>
+      <div class="row" style="margin-bottom:6px"><button id="openDown" type="button" class="alt" style="flex:1">Subtitle Downloader 1</button><button id="openSave" type="button" class="alt" style="flex:1">Subtitle Downloader 2</button></div>
       <p class="note" style="margin:0 0 10px">Your video link is copied automatically. If the field on the site is empty, just paste it (Ctrl+V).</p>
-      <label for="paste">Paste subtitle content (.srt or .vtt)</label>
+      <label for="file">Select a subtitle file (.srt / .vtt)</label><input id="file" type="file" accept=".srt,.vtt,.txt,text/*">
+      <label for="paste" style="margin-top:12px">Or paste subtitle content (.srt or .vtt)</label>
       <textarea id="paste" placeholder="Paste the subtitle content here"></textarea>
-      <label for="file" style="margin-top:12px">Or select a subtitle file (.srt / .vtt)</label><input id="file" type="file" accept=".srt,.vtt,.txt,text/*">
       <label for="pasteLang" style="margin-top:12px">Language of the subtitle you entered</label>
       <div class="row"><select id="pasteLang" aria-label="Subtitle language"><option value="ja">Japanese</option><option value="id">Indonesian</option><option value="en">English</option></select><button id="usePaste" class="alt">Apply</button></div>
     </details>
@@ -489,7 +489,7 @@ function paintSbx() { $('sbxBtn').textContent = looseSbx ? 'Re-enable pop-up pro
 $('sbxBtn').onclick = () => {
   if (!lastWin) return;
   looseSbx = !looseSbx; P = mountWindow(lastWin, looseSbx); setCtl(false); paintSbx();
-  status(looseSbx ? 'Pop-up protection is OFF for this source so the site can open ad tabs again. Re-enable may pause the video.' : 'Pop-up protection is active again.', looseSbx);
+  status(looseSbx ? 'Pop-up protection is OFF for this source so the site can open ad tabs again. Re-enable may pause the video.' : 'Pop-up protection is active again.', looseSbx, looseSbx);
 };
 
 /* ---------- Subtitle manual (.srt / .vtt) ---------- */
