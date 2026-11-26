@@ -117,9 +117,10 @@ button.alt:hover{background:rgba(255,255,255,.32);box-shadow:0 10px 24px rgba(88
 .status.err{color:#fff;background:rgba(255,80,130,.38);border:1px solid rgba(255,255,255,.4);padding:9px 14px;border-radius:14px}
 .status.small{font-size:.63rem}
 details{margin-top:12px}
-summary{cursor:pointer;color:#fff;font-weight:600;font-size:.9rem;min-height:40px;display:flex;align-items:center;gap:6px;list-style:none}
+summary{cursor:pointer;color:#fff;font-weight:600;font-size:.9rem;min-height:44px;display:flex;align-items:center;gap:6px;list-style:none;-webkit-tap-highlight-color:transparent}
 summary::-webkit-details-marker{display:none}
-summary::after{content:"＋";margin-left:auto;transition:transform .25s}
+/* simbol (+) membuka panel, (×) menutup. Ukuran lama = .9rem; +30% = 1.17rem; bold */
+summary::after{content:"＋";margin-left:auto;transition:transform .25s;font-size:1.17rem;font-weight:700;line-height:1;padding:0 6px}
 details[open] summary::after{transform:rotate(45deg)}
 
 /* ---------- Pemutar ---------- */
@@ -242,6 +243,7 @@ details[open] summary::after{transform:rotate(45deg)}
     <div id="player" class="player"></div>
     <div class="seek"><span id="tcur">0:00</span><input id="seekbar" type="range" min="0" max="1000" step="1" value="0" disabled aria-label="Posisi video"><span id="tdur">0:00</span></div>
     <div class="ctl"><button id="back" class="alt" aria-label="Mundur 10 detik">&lt; 10 dtk</button><button id="toggle" aria-label="Putar atau jeda">▶ Putar</button><button id="fwd" class="alt" aria-label="Maju 10 detik">10 dtk &gt;</button></div>
+    <button id="sbxBtn" type="button" class="alt" hidden style="width:100%;min-height:44px;font-size:.8rem;margin:-8px 0 14px"></button>
     <div class="card">
       <div class="set">
         <div><label for="every">Jeda sorotan (menit)</label><div class="stepper"><button id="evDec" type="button" class="alt" aria-label="Kurangi jeda">−</button><input id="every" type="number" min="0.5" max="60" step="0.5" value="3" inputmode="decimal"><button id="evInc" type="button" class="alt" aria-label="Tambah jeda">+</button></div></div>
@@ -352,10 +354,19 @@ function classifyEmbed(raw) {
   return { kind: 'window', url: u.href, origin: u.origin };
 }
 
-function mountFrame(src) {
+/* Perlindungan pop-up/redirect: iframe "jendela" (situs sumber seperti HiAnime) diberi sandbox TANPA allow-popups,
+   allow-popups-to-escape-sandbox, allow-top-navigation, allow-top-navigation-by-user-activation, allow-modals.
+   Akibatnya window.open / target=_blank / pop-under dari dalam player diblokir BROWSER (bukan sekadar tampilan), dan halaman
+   di dalam iframe tidak bisa membawa kita pindah ke situs lain (top.location). Sandbox diwarisi iframe di dalam iframe.
+   allow-scripts + allow-same-origin + allow-forms dipertahankan agar player, subtitle, dan kontrolnya tetap bisa jalan.
+   Sandbox tidak mencegah halaman di dalam iframe mengarahkan DIRINYA SENDIRI ke situs lain (tetap tampil di dalam kotak pemutar). */
+const SANDBOX_SAFE = 'allow-scripts allow-same-origin allow-forms allow-presentation';
+function mountFrame(src, sandbox) {
   const f = document.createElement('iframe');
   f.title = 'Pemutar video'; f.allow = IFRAME_ALLOW; f.referrerPolicy = 'strict-origin-when-cross-origin';
-  // tanpa atribut allowfullscreen dan tanpa sandbox (AnimeEmbed dan VidRift menolak diputar di iframe ber-sandbox)
+  // tanpa atribut allowfullscreen. AnimeEmbed dan VidRift dimuat TANPA sandbox (keduanya menolak diputar di iframe ber-sandbox);
+  // hanya sumber "jendela" yang memakai sandbox (lihat mountWindow).
+  if (sandbox) f.setAttribute('sandbox', sandbox);
   f.src = src; $('player').replaceChildren(f);
   return f;
 }
@@ -427,8 +438,8 @@ function mountVidRift(info) {
 }
 
 /* Situs lain: tampil sebagai jendela (player asli situs itu). Tidak ada kontrol lintas-origin, dan itu dilaporkan apa adanya. */
-function mountWindow(info) {
-  mountFrame(info.url);
+function mountWindow(info, loose) {
+  mountFrame(info.url, loose ? null : SANDBOX_SAFE);
   const noop = () => {};
   return { viewOnly: true, play: noop, pause: noop, seekBy: noop, seek: noop, time: () => 0, dur: () => 0, playing: () => false, destroy: noop };
 }
@@ -440,9 +451,16 @@ async function loadEmbed(emb) {
     status('⏳ Pemutar AnimeEmbed dimuat. Menunggu sambungan kontrol…');
   }
   else if (emb.kind === 'vidrift') { P = mountVidRift(emb); status('⏳ Pemutar VidRift dimuat. Menunggu sambungan kontrol…'); }
-  else { P = mountWindow(emb); setCtl(false); status(emb.note === 'kuroko' ? KUROKO_MSG : WINDOW_MSG, false, true); }
-  $('pasteBox').open = true;
+  else { lastWin = emb; looseSbx = false; P = mountWindow(emb, false); setCtl(false); paintSbx(); $('sbxBtn').hidden = false; status(emb.note === 'kuroko' ? KUROKO_MSG : WINDOW_MSG, false, true); }
 }
+/* Cadangan bila ada player yang menolak diputar di dalam sandbox: pengguna bisa melonggarkan perlindungan (dan mengaktifkannya lagi). */
+let lastWin = null, looseSbx = false, loadSeq = 0;
+function paintSbx() { $('sbxBtn').textContent = looseSbx ? '🛡 Aktifkan lagi perlindungan pop-up' : 'Video tidak jalan? Longgarkan perlindungan pop-up'; }
+$('sbxBtn').onclick = () => {
+  if (!lastWin) return;
+  looseSbx = !looseSbx; P = mountWindow(lastWin, looseSbx); setCtl(false); paintSbx();
+  status(looseSbx ? 'Perlindungan pop-up DIMATIKAN untuk sumber ini: situs bisa membuka tab iklan lagi. Aktifkan lagi setelah video jalan.' : 'Perlindungan pop-up aktif lagi.', looseSbx);
+};
 
 /* ---------- Subtitle manual (.srt / .vtt) ---------- */
 function parseTime(s) { const m = s.trim().match(/(?:(\d+):)?(\d+):(\d+)[.,](\d+)/); return m ? Number(m[1] || 0) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number('0.' + m[4]) : NaN; }
@@ -467,9 +485,26 @@ async function getSubs(raw) {
   } catch (e) { status('❌ GAGAL: server tidak menjawab tepat waktu. Tekan Muat untuk mencoba lagi.', true, true); $('pasteBox').open = true; }
 }
 
+/* ---------- Subtitle otomatis dari halaman sumber video (selain YouTube) ----------
+   Server membaca yang tersedia publik di halaman/pemutar milik link ini (<track>, konfigurasi pemutar, iframe pemutar),
+   jadi subtitle terhubung dengan episode yang diputar. Bila tidak ada / ditolak situs: tampilkan alasannya + panel manual. */
+async function getPageSubs(raw, seq) {
+  status('⏳ Mencari subtitle di sumber video… (bisa sampai 20 detik)'); subs = null; acc = 0;
+  const note = P && P.viewOnly ? ' Sumber ini tampil sebagai jendela: jeda otomatis tidak tersedia, tombol ✨ tetap bisa dipakai. Jika kotak pemutar kosong, situs itu melarang disematkan.' : '';
+  try {
+    const r = await (await fetch('/api/page-subtitles?pref=' + encodeURIComponent($('pasteLang').value) + '&url=' + encodeURIComponent(raw), { signal: timeoutSignal(25000) })).json();
+    if (seq !== loadSeq) return; // pengguna sudah memuat video lain
+    if (r.ok) {
+      subs = { cues: r.cues, lang: r.language && r.language !== 'und' ? r.language : $('pasteLang').value, auto: false };
+      $('pasteBox').open = false;
+      status(`✅ ${r.cues.length} baris subtitle diambil otomatis dari sumber video (bahasa: ${r.label || r.language}).` + (P && P.viewOnly ? note : ' Tekan Putar.'));
+    } else { status('❌ ' + (r.message || 'Subtitle tidak bisa diambil otomatis.') + note, true, true); $('pasteBox').open = true; }
+  } catch (e) { if (seq !== loadSeq) return; status('❌ GAGAL: server tidak menjawab tepat waktu. Tekan Muat untuk mencoba lagi, atau pakai "Tempel manual".' + note, true, true); $('pasteBox').open = true; }
+}
+
 /* ---------- Memuat video ---------- */
 $('load').onclick = async () => {
-  const raw = $('link').value.trim(); subs = null; shown = []; acc = 0; if (P) { try { P.pause(); } catch (e) {} if (P.destroy) { try { P.destroy(); } catch (e) {} P = null; } } setCtl(true);
+  const raw = $('link').value.trim(); const seq = ++loadSeq; lastWin = null; $('sbxBtn').hidden = true; subs = null; shown = []; acc = 0; if (P) { try { P.pause(); } catch (e) {} if (P.destroy) { try { P.destroy(); } catch (e) {} P = null; } } setCtl(true);
   if (!/^https?:\/\//i.test(raw)) return status('Tempel link yang dimulai dengan https://', true);
   const id = ytId(raw);
   try {
@@ -481,7 +516,8 @@ $('load').onclick = async () => {
       P = mountVideo(raw); $('stage').hidden = false; status('Video dimuat. Tempel subtitle manual di bawah agar sorotan kata bisa jalan.'); $('pasteBox').open = true;
     } else {
       const emb = classifyEmbed(raw);
-      if (emb) await loadEmbed(emb); else status('Link belum didukung. Pakai link https:// (YouTube, file .mp4, atau halaman pemutar video).', true);
+      if (emb) { await loadEmbed(emb); if (P && seq === loadSeq) await getPageSubs(raw, seq); }
+      else status('Link belum didukung. Pakai link https:// (YouTube, file .mp4, atau halaman pemutar video).', true);
     }
   } catch (e) { status(e && e.message === 'timeout' ? 'Pemutar YouTube tidak merespons. Coba video lain, matikan pemblokir iklan untuk situs ini, atau muat ulang dengan Ctrl+F5.' : 'Gagal memuat. Periksa internet lalu coba lagi.', true); }
 };
@@ -504,6 +540,7 @@ $('usePaste').onclick = () => {
   const cues = parseSubs($('paste').value);
   if (!cues.length) return status('Subtitle tidak terbaca. Pastikan isinya format .srt atau .vtt.', true);
   subs = { cues, lang: $('pasteLang').value, auto: false }; status(`✓ ${cues.length} baris subtitle dipakai.`);
+  $('pasteBox').open = false; // panel input hanya terlihat saat memasukkan/mengganti subtitle; isi subtitle (subs) & bahasa tetap
 };
 
 /* ---------- Tombol video ---------- */
