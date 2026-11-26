@@ -25,6 +25,11 @@ const MSG = {
   BOT_BLOCK: 'YouTube menolak memberi subtitle ke server ini (server dianggap bot). Pakai "Tempel manual" di bawah: unggah atau tempel file subtitle .srt/.vtt.',
   QUOTA: 'Kuota layanan subtitle bulan ini habis. Pakai "Tempel manual" di bawah, atau coba lagi bulan depan.',
   NO_TOKENIZER: 'Mesin pemecah kata Jepang belum siap. Tunggu sebentar lalu coba lagi.',
+  IS_YOUTUBE: 'Link YouTube memakai jalur subtitle YouTube, bukan jalur halaman sumber.',
+  PAGE_BLOCKED: 'Situs sumber menolak permintaan otomatis (butuh login, verifikasi, atau pembatasan lain). Aplikasi tidak mencoba menembusnya. Pakai "Tempel manual" di bawah.',
+  PAGE_FAIL: 'Server tidak bisa membuka halaman sumber video. Periksa link-nya, atau pakai "Tempel manual" di bawah.',
+  NO_TRACKS: 'Tidak ada subtitle publik yang bisa dibaca dari halaman ini. Pada banyak situs subtitle dimuat oleh pemutar lewat JavaScript atau memakai token, sehingga tidak bisa diambil otomatis. Pakai "Tempel manual" di bawah.',
+  TRACK_FAIL: 'Subtitle ditemukan, tetapi file-nya tidak bisa diunduh atau dibaca (formatnya belum didukung atau dilindungi). Pakai "Tempel manual" di bawah.',
 };
 
 // ---------- Subtitle ----------
@@ -239,6 +244,197 @@ async function fetchViaSupadata(fetchImpl, key, videoId) { // hasil: {ok,...} | 
   } catch (e) { trace.push('SUPADATA:' + tag(e)); return { error: 'SOFT', trace }; }
 }
 
+// ---------- Subtitle dari halaman sumber video lain (bukan YouTube) ----------
+// Hanya membaca yang tersedia SECARA PUBLIK: tag <track>, konfigurasi pemutar yang tertulis di HTML/skrip,
+// dan halaman pemutar di dalam <iframe> (maksimal 2 tingkat). Subtitle selalu diambil dari rantai halaman/pemutar
+// milik URL yang dimasukkan pengguna, jadi terhubung dengan episode yang sedang diputar (bukan dicari lewat judul).
+// TIDAK menjalankan JavaScript situs, TIDAK memecahkan token/enkripsi/CAPTCHA/login/DRM. Bila situs menolak, berhenti dan melapor.
+const net = require('net');
+const dns = require('dns').promises;
+const PAGE_LIMIT = 10;         // pencarian subtitle halaman per menit per pengunjung
+const PAGE_MAX_PAGES = 6;      // paling banyak halaman (utama + iframe) yang dibuka per permintaan
+const PAGE_MAX_DEPTH = 2;      // halaman utama -> iframe -> iframe di dalam iframe
+
+// Server tidak boleh disuruh membuka alamat internal (SSRF): semua alamat dicek ke IP publik, termasuk tiap pengalihan.
+function isPrivateIp(ip) {
+  ip = String(ip).toLowerCase();
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && (b === 168 || b === 0)) || (a === 198 && (b === 18 || b === 19));
+  }
+  if (net.isIPv6(ip)) {
+    if (ip === '::' || ip === '::1') return true;
+    const m4 = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/); if (m4) return isPrivateIp(m4[1]);
+    const mh = ip.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (mh) { const hi = parseInt(mh[1], 16), lo = parseInt(mh[2], 16); return isPrivateIp(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`); }
+    const h = parseInt(ip.split(':')[0] || '0', 16);
+    return (h & 0xfe00) === 0xfc00 || (h & 0xffc0) === 0xfe80 || (h & 0xff00) === 0xff00;
+  }
+  return true;
+}
+const defaultLookup = (host) => dns.lookup(host, { all: true });
+
+async function assertPublicUrl(raw, lookup) {
+  const u = new URL(raw);
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error('protokol');
+  if (u.username || u.password) throw new Error('kredensial');
+  if (u.port && u.port !== '80' && u.port !== '443') throw new Error('port');
+  const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === 'localhost' || /\.(localhost|local|internal|lan|home)$/.test(host)) throw new Error('alamat lokal');
+  const addrs = net.isIP(host) ? [{ address: host }] : await lookup(host);
+  if (!addrs || !addrs.length || addrs.some((a) => isPrivateIp(a.address))) throw new Error('alamat lokal');
+  return u;
+}
+
+async function readCapped(r, max) {
+  const reader = r.body && r.body.getReader ? r.body.getReader() : null;
+  if (!reader) { const t = await r.text(); if (t.length > max) throw new Error('terlalu besar'); return t; }
+  const chunks = []; let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    size += value.length;
+    if (size > max) { try { await reader.cancel(); } catch { /* abaikan */ } throw new Error('terlalu besar'); }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+async function safeGet(fetchImpl, raw, { lookup, headers = {}, timeout = 4500, max = 3e6 } = {}) {
+  let url = raw;
+  for (let hop = 0; hop < 4; hop++) {
+    const u = await assertPublicUrl(url, lookup);
+    const r = await fetchImpl(u.href, { redirect: 'manual', headers, signal: AbortSignal.timeout(timeout) });
+    if (r.status >= 300 && r.status < 400 && r.headers.get('location')) { url = new URL(r.headers.get('location'), u).href; continue; }
+    if (!r.ok) { const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
+    return { text: await readCapped(r, max), url: u.href, status: r.status };
+  }
+  throw new Error('terlalu banyak pengalihan');
+}
+
+// ---- membaca daftar subtitle dari HTML / skrip pemutar ----
+const attrX = (a, n) => { const m = String(a).match(new RegExp('(?:^|[\\s"\'])' + n + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\'|([^\\s>]+))', 'i')); return m ? decodeEntities(m[1] ?? m[2] ?? m[3] ?? '') : null; };
+const LANG_WORDS = { ja: ['ja', 'jpn', 'jp', 'japanese', 'japan', 'nihongo'], en: ['en', 'eng', 'english', 'inggris'], id: ['id', 'ind', 'indo', 'indonesia', 'indonesian', 'bahasa'] };
+function langOf(text) { // 'English' / 'ja-JP' / '日本語' / 'eng' -> 'en' | 'ja' | 'id' | null
+  const s = String(text || '');
+  if (/日本語|日本/.test(s)) return 'ja';
+  const toks = s.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  for (const l of ['ja', 'en', 'id']) if (toks.some((t) => LANG_WORDS[l].includes(t))) return l;
+  return null;
+}
+const baseName = (u) => { try { return decodeURIComponent(new URL(u).pathname.split('/').pop() || '').replace(/\.[a-z0-9]{2,4}$/i, ''); } catch { return ''; } };
+
+function scanTracks(rawText, base) { // -> [{url,label,lang,default}]
+  const text = String(rawText || '').replace(/\\u0026/gi, '&').replace(/\\u002f/gi, '/').replace(/\\\//g, '/');
+  const out = new Map(), skip = new Set(); // skip: file yang sudah diketahui BUKAN subtitle, jangan dimasukkan lagi lewat pemindaian URL
+  const add = (src, meta = {}) => {
+    if (!src) return;
+    let u; try { u = new URL(decodeEntities(src).trim(), base); } catch { return; }
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return;
+    if (skip.has(u.href)) return;
+    if (/^(metadata|chapters|descriptions|thumbnails)$/i.test(meta.kind || '')) { skip.add(u.href); return; }
+    const bn = baseName(u.href);
+    if (/thumb|sprite|storyboard/i.test(bn)) return; // file VTT peta gambar, bukan subtitle
+    const rawLang = String(meta.srclang || '').split('-')[0].toLowerCase();
+    const lang = langOf(meta.srclang) || langOf(meta.label) || langOf(bn) || (/^[a-z]{2,3}$/.test(rawLang) ? rawLang : null);
+    const prev = out.get(u.href);
+    if (prev) { prev.label = prev.label || meta.label || ''; prev.lang = prev.lang || lang; prev.default = prev.default || !!meta.def; }
+    else out.set(u.href, { url: u.href, label: String(meta.label || '').slice(0, 60), lang, default: !!meta.def });
+  };
+  let m;
+  const trackRe = /<track\b[^>]*>/gi; // 1) elemen HTML <track>
+  while ((m = trackRe.exec(text))) {
+    const kind = (attrX(m[0], 'kind') || 'subtitles').toLowerCase();
+    if (kind !== 'subtitles' && kind !== 'captions') { add(attrX(m[0], 'src'), { kind }); continue; }
+    add(attrX(m[0], 'src'), { kind, srclang: attrX(m[0], 'srclang'), label: attrX(m[0], 'label'), def: /\sdefault(\s|=|>|\/)/i.test(m[0]) });
+  }
+  const kv = (chunk, keys) => { const r = chunk.match(new RegExp('["\']?\\b(?:' + keys + ')["\']?\\s*:\\s*["\']([^"\']*)["\']', 'i')); return r ? r[1] : null; };
+  const objRe = /\{[^{}]{0,700}?\.(?:vtt|srt)\b[^{}]{0,700}?\}/gi; // 2-3) objek konfigurasi pemutar: {file:"x.vtt", label:"English", kind:"captions"}
+  while ((m = objRe.exec(text))) {
+    const c = m[0];
+    add(kv(c, 'file|url|src|link|path'), { kind: kv(c, 'kind'), srclang: kv(c, 'srclang|lang|language|code'), label: kv(c, 'label|name|title'), def: /["']?default["']?\s*:\s*true/i.test(c) });
+  }
+  const bare = /https?:\/\/[^\s"'<>\\)]+?\.(?:vtt|srt)(?:\?[^\s"'<>\\)]*)?/gi; // 4) alamat file subtitle yang tertulis langsung
+  while ((m = bare.exec(text))) add(m[0]);
+  const rel = /["'(]((?:\/|\.\.?\/)[^"'\s<>()]+?\.(?:vtt|srt)(?:\?[^"'\s<>()]*)?)["')]/gi;
+  while ((m = rel.exec(text))) add(m[1]);
+  return [...out.values()];
+}
+
+function scanFrames(text, base) { // 5) pemutar pihak ketiga biasanya ada di <iframe>
+  const out = []; let m; const re = /<iframe\b[^>]*>/gi;
+  while ((m = re.exec(String(text || '')))) {
+    const src = attrX(m[0], 'src') || attrX(m[0], 'data-src') || attrX(m[0], 'data-lazy-src');
+    if (!src || /^\s*(about:|javascript:|data:|blob:)/i.test(src)) continue;
+    try { const u = new URL(src.trim(), base); if (u.protocol === 'https:' || u.protocol === 'http:') out.push(u.href); } catch { /* abaikan */ }
+  }
+  return out;
+}
+
+function rankCandidates(list, pref) { // 7) bahasa pilihan pengguna dulu, lalu Jepang, Inggris, Indonesia, bahasa lain, tak dikenal
+  const order = [pref, 'ja', 'en', 'id'].filter((x, i, a) => x && a.indexOf(x) === i);
+  const score = (c) => {
+    let s = order.indexOf(c.lang); if (s < 0) s = c.lang ? order.length : order.length + 1;
+    if (/forced|sign|song|commentary|karaoke/i.test(c.label || '')) s += 0.5;
+    return c.default ? s - 0.1 : s;
+  };
+  return [...list].sort((a, b) => score(a) - score(b));
+}
+
+function guessLang(cues) { // dipakai hanya bila situs tidak menyebut bahasa subtitle
+  const t = cues.slice(0, 200).map((c) => c.text).join(' ');
+  if (!t) return null;
+  const kana = (t.match(/[\u3040-\u30ff\u4e00-\u9fff]/g) || []).length;
+  if (kana / t.length > 0.15) return 'ja';
+  return (t.match(/[A-Za-z]/g) || []).length / t.length > 0.5 ? 'en' : null;
+}
+
+const hostOf = (u) => { try { return new URL(u).hostname; } catch { return '?'; } };
+const looksBlocked = (t) => /just a moment|cf-chl|attention required|captcha|ddos-guard|access denied/i.test(String(t || '').slice(0, 4000));
+
+async function fetchPageSubtitles(fetchImpl, pageUrl, { lookup = defaultLookup, pref = 'ja', budget = 8000 } = {}) {
+  const deadline = Date.now() + budget, trace = [];
+  const left = () => Math.max(800, Math.min(4500, deadline - Date.now()));
+  const get = (url, referer) => safeGet(fetchImpl, url, { lookup, timeout: left(), headers: { 'User-Agent': CHROME_UA, 'Accept-Language': 'en-US,en;q=0.9', Accept: '*/*', ...(referer ? { Referer: referer } : {}) } });
+  const cands = new Map(), seen = new Set([pageUrl]);
+  let title = '', blocked = false, mainFailed = null, fetched = 0, level = [{ url: pageUrl, referer: null }];
+  for (let depth = 0; depth <= PAGE_MAX_DEPTH && level.length && Date.now() < deadline; depth++) {
+    level = level.slice(0, PAGE_MAX_PAGES - fetched); fetched += level.length;
+    const res = await Promise.all(level.map(async (p) => { try { return { p, r: await get(p.url, p.referer) }; } catch (e) { return { p, e }; } }));
+    const next = [];
+    for (const { p, r, e } of res) {
+      const lbl = (depth ? 'FRAME:' : 'PAGE:') + hostOf(p.url);
+      if (e) {
+        trace.push(lbl + ':' + tag(e));
+        if (e.status === 401 || e.status === 403 || e.status === 429 || e.status === 503) blocked = true;
+        if (!depth) mainFailed = e;
+        continue;
+      }
+      trace.push(lbl + ':ok');
+      if (!depth) title = cleanText(decodeEntities((r.text.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '')).slice(0, 120);
+      for (const c of scanTracks(r.text, r.url)) { if (!cands.has(c.url)) cands.set(c.url, { ...c, ref: r.url }); }
+      if (!cands.size && looksBlocked(r.text)) blocked = true;
+      if (depth < PAGE_MAX_DEPTH) for (const f of scanFrames(r.text, r.url)) if (!seen.has(f)) { seen.add(f); next.push({ url: f, referer: r.url }); }
+    }
+    level = next;
+  }
+  if (mainFailed && !cands.size) return { error: blocked ? 'PAGE_BLOCKED' : 'PAGE_FAIL', trace };
+  if (!cands.size) return { error: blocked ? 'PAGE_BLOCKED' : 'NO_TRACKS', trace };
+
+  const ranked = rankCandidates([...cands.values()], pref);
+  const available = ranked.map((c) => ({ lang: c.lang || 'und', label: c.label })).slice(0, 12);
+  trace.push('TRACKS:' + ranked.length);
+  let denied = false;
+  for (const c of ranked.slice(0, 4)) {
+    if (Date.now() > deadline) break;
+    try {
+      const cues = parseCaption((await get(c.url, c.ref)).text);
+      if (cues.length) return { ok: true, videoId: null, title, language: c.lang || guessLang(cues) || 'und', label: c.label, auto: false, cues, available, source: hostOf(c.ref || pageUrl), trace };
+      trace.push('SUB:' + hostOf(c.url) + ':kosong');
+    } catch (e) { trace.push('SUB:' + hostOf(c.url) + ':' + tag(e)); if (e.status === 401 || e.status === 403) denied = true; }
+  }
+  return { error: denied ? 'PAGE_BLOCKED' : 'TRACK_FAIL', trace };
+}
+
 // ---------- Kana & romaji ----------
 const toHiragana = (s) => s.replace(/[\u30A1-\u30F6]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
 const isKatakanaOnly = (s) => /^[\u30A0-\u30FF]+$/.test(s);
@@ -392,7 +588,7 @@ function defaultTokenizer() {
 // Referrer-Policy strict-origin-when-cross-origin: pemutar tertanam mengenali halaman induknya dari origin (sama dengan <meta name="referrer"> di index.html).
 const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.youtube.com https://s.ytimg.com https://animeembed.com; frame-src https:; img-src 'self' data: https://i.ytimg.com; media-src *; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
-function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, indexPath = path.join(__dirname, 'index.html'), supadataKey = process.env.SUPADATA_API_KEY } = {}) {
+function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, indexPath = path.join(__dirname, 'index.html'), supadataKey = process.env.SUPADATA_API_KEY, lookup = defaultLookup } = {}) {
   const hits = new Map();
   const cache = new Map();
   const subCache = new Map(); // subtitle disimpan SEMENTARA di memori server (20 menit) agar hemat kuota; tidak ada penyimpanan permanen
@@ -445,6 +641,19 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
         return out.error ? send(out.error === 'UPSTREAM' ? 502 : 200, { ok: false, code: out.error, message: MSG[out.error], trace: (out.trace || []).join(' ').slice(0, 400) }) : send(200, out);
       }
 
+      if (req.method === 'GET' && url.pathname === '/api/page-subtitles') { // sumber video selain YouTube
+        if (tooMany('page', PAGE_LIMIT)) return fail(429, 'RATE_LIMIT');
+        const raw = (url.searchParams.get('url') || '').trim();
+        let target = null;
+        if (raw.length <= 800) { try { const t = new URL(raw); if (t.protocol === 'https:' || t.protocol === 'http:') target = t; } catch { /* tidak valid */ } }
+        if (!target) return fail(400, 'BAD_LINK');
+        if (YT_HOSTS.has(target.hostname.toLowerCase())) return fail(400, 'IS_YOUTUBE');
+        const pref = /^(ja|en|id)$/.test(url.searchParams.get('pref') || '') ? url.searchParams.get('pref') : 'ja';
+        let out;
+        try { out = await fetchPageSubtitles(fetchImpl, target.href, { lookup, pref }); } catch { return fail(502, 'PAGE_FAIL'); }
+        return out.error ? send(200, { ok: false, code: out.error, message: MSG[out.error], trace: (out.trace || []).join(' ').slice(0, 400) }) : send(200, out);
+      }
+
       if (req.method === 'POST' && url.pathname === '/api/highlight') {
         if (tooMany('hl', HL_LIMIT)) return fail(429, 'RATE_LIMIT');
         if (!/^application\/json/i.test(req.headers['content-type'] || '')) return send(415, { ok: false, code: 'BAD_INPUT', message: MSG.BAD_INPUT });
@@ -476,7 +685,7 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
   });
 }
 
-module.exports = { createServer, fetchViaSupadata, parseXml, parseVtt, parseCaption, extractPlayerResponse, orderTracks, fetchSubtitles, extractVideoId, parseJson3, pickTrack, captionUrl, cleanText, buildCard, cleanInput, toRomaji, toHiragana, candidates, partsOf };
+module.exports = { fetchPageSubtitles, scanTracks, scanFrames, rankCandidates, langOf, isPrivateIp, assertPublicUrl, createServer, fetchViaSupadata, parseXml, parseVtt, parseCaption, extractPlayerResponse, orderTracks, fetchSubtitles, extractVideoId, parseJson3, pickTrack, captionUrl, cleanText, buildCard, cleanInput, toRomaji, toHiragana, candidates, partsOf };
 
 if (require.main === module) {
   createServer().listen(PORT, () => {
