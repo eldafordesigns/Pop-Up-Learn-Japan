@@ -190,5 +190,66 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
     await withServer({ fetchImpl: none, supadataKey: 'KUNCI' }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.code, 'NO_SUBTITLE'); });
   });
 
+  // ---------- Subtitle otomatis dari sumber video selain YouTube ----------
+  const pubIp = async () => [{ address: '93.184.216.34' }];
+  const web = (body, status = 200) => new Response(body, { status });
+  const VTT_JA = 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nこんにちは世界\n\n00:00:04.000 --> 00:00:06.000\n<i>元気ですか</i>';
+  const siteFetch = async (url) => {
+    const u = String(url);
+    if (u === 'https://site.test/watch/x?ep=5') return web('<title>Ep 5</title><iframe src="https://player.test/e/1"></iframe>');
+    if (u === 'https://player.test/e/1') return web('<video><track kind="captions" src="/en.vtt" srclang="en" label="English"><track kind="captions" src="/ja.vtt" srclang="ja" label="Japanese"><track kind="metadata" src="/meta.vtt"></video>');
+    if (u === 'https://player.test/ja.vtt') return web(VTT_JA);
+    if (u === 'https://player.test/en.vtt') return web('WEBVTT\n\n00:00:01.500 --> 00:00:03.000\nHello world');
+    if (u === 'https://static.test/p') return web('<title>Tanpa pemutar</title><div id="player"></div>');
+    if (u === 'https://blocked.test/p') return web('Forbidden', 403);
+    return web('nf', 404);
+  };
+  await ok('Subtitle halaman: <track>, konfigurasi pemutar, URL telanjang; metadata & thumbnail dilewati', () => {
+    const t = S.scanTracks('<track kind="captions" src="/a/en.vtt" srclang="en" label="English" default><track kind="metadata" src="/a/meta.vtt"><script>setup({tracks:[{file:"https:\\/\\/c.x/id.vtt?a=1\\u0026b=2",label:"Indonesian"},{file:"/t/thumbs.vtt",kind:"thumbnails"}]})</script>', 'https://s.test/w');
+    const by = Object.fromEntries(t.map((x) => [x.url, x]));
+    assert.strictEqual(by['https://s.test/a/en.vtt'].lang, 'en'); assert.ok(by['https://s.test/a/en.vtt'].default);
+    assert.strictEqual(by['https://c.x/id.vtt?a=1&b=2'].lang, 'id');
+    assert.strictEqual(t.length, 2);
+    assert.strictEqual(S.langOf('日本語'), 'ja'); assert.strictEqual(S.langOf('English'), 'en'); assert.strictEqual(S.langOf('ru-RU'), null);
+  });
+  await ok('Subtitle halaman: halaman -> iframe, Referer dikirim, bahasa pilihan diprioritaskan', async () => {
+    const refs = [];
+    const f = async (url, o) => { refs.push([String(url), o.headers.Referer || null]); return siteFetch(url); };
+    let r = await S.fetchPageSubtitles(f, 'https://site.test/watch/x?ep=5', { lookup: pubIp, pref: 'ja' });
+    assert.ok(r.ok); assert.strictEqual(r.language, 'ja'); assert.strictEqual(r.cues.length, 2); assert.strictEqual(r.cues[1].text, '元気ですか'); assert.strictEqual(r.title, 'Ep 5');
+    assert.deepStrictEqual(refs.find(([u]) => u === 'https://player.test/e/1'), ['https://player.test/e/1', 'https://site.test/watch/x?ep=5']);
+    r = await S.fetchPageSubtitles(siteFetch, 'https://site.test/watch/x?ep=5', { lookup: pubIp, pref: 'en' });
+    assert.strictEqual(r.language, 'en');
+  });
+  await ok('Subtitle halaman: tanpa subtitle / diblokir / error -> pesan jelas, tidak menembus pembatasan', async () => {
+    assert.strictEqual((await S.fetchPageSubtitles(siteFetch, 'https://static.test/p', { lookup: pubIp })).error, 'NO_TRACKS');
+    assert.strictEqual((await S.fetchPageSubtitles(siteFetch, 'https://blocked.test/p', { lookup: pubIp })).error, 'PAGE_BLOCKED');
+    assert.strictEqual((await S.fetchPageSubtitles(async () => web('x', 500), 'https://a.test/p', { lookup: pubIp })).error, 'PAGE_FAIL');
+    assert.strictEqual((await S.fetchPageSubtitles(async () => web('<title>Just a moment...</title>'), 'https://a.test/p', { lookup: pubIp })).error, 'PAGE_BLOCKED');
+    assert.strictEqual((await S.fetchPageSubtitles(async (u) => (String(u).endsWith('.vtt') ? web('rusak') : web('<track kind="captions" src="/x.vtt" srclang="en">')), 'https://a.test/p', { lookup: pubIp })).error, 'TRACK_FAIL');
+  });
+  await ok('Keamanan: server tidak mau membuka alamat internal (SSRF), termasuk lewat DNS dan redirect', async () => {
+    for (const bad of ['http://localhost/x', 'http://127.0.0.1/x', 'http://10.0.0.5/x', 'http://169.254.169.254/latest', 'http://[::1]/x', 'http://[fd00::1]/x', 'https://a.test:8443/x', 'https://u:p@a.test/x', 'ftp://a.test/x']) await assert.rejects(S.assertPublicUrl(bad, pubIp), bad);
+    await assert.rejects(S.assertPublicUrl('https://evil.test/x', async () => [{ address: '10.1.1.1' }]));
+    let hit = 0;
+    const r = await S.fetchPageSubtitles(async () => { hit++; return new Response('', { status: 302, headers: { location: 'http://169.254.169.254/x' } }); }, 'https://a.test/p', { lookup: async (h) => [{ address: h === 'a.test' ? '8.8.8.8' : '169.254.169.254' }] });
+    assert.strictEqual(hit, 1); assert.ok(r.error);
+    assert.strictEqual(S.isPrivateIp('8.8.8.8'), false);
+    assert.ok((await S.fetchPageSubtitles(async () => web('a'.repeat(4e6)), 'https://a.test/p', { lookup: pubIp })).error); // terlalu besar
+  });
+  await ok('Endpoint /api/page-subtitles: sukses, YouTube dialihkan, link rusak, alamat lokal, batas laju; jalur lama tetap', async () => {
+    await withServer({ fetchImpl: siteFetch, lookup: pubIp }, async (b) => {
+      const q = (u, extra = '') => getJson(b, '/api/page-subtitles?' + extra + 'url=' + encodeURIComponent(u));
+      let r = await q('https://site.test/watch/x?ep=5', 'pref=ja&'); assert.strictEqual(r.body.ok, true); assert.strictEqual(r.body.language, 'ja'); assert.strictEqual(r.body.cues.length, 2);
+      assert.strictEqual((await q('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).body.code, 'IS_YOUTUBE');
+      assert.strictEqual((await q('bukan-url')).status, 400);
+      assert.strictEqual((await q('http://127.0.0.1/x')).body.ok, false);
+      assert.strictEqual((await getJson(b, '/api/subtitles?url=' + encodeURIComponent('https://hianime.ba/x'))).body.code, 'UNSUPPORTED_SITE'); // jalur YouTube lama tak berubah
+      assert.strictEqual((await getJson(b, '/api/health')).body.ok, true);
+      for (let i = 0; i < 12; i++) r = await q('https://site.test/watch/x?ep=5');
+      assert.strictEqual(r.body.code, 'RATE_LIMIT');
+    });
+  });
+
   console.log('\n' + passed + ' tes lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ', semua aman'));
 })();
