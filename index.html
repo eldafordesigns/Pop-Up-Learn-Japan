@@ -534,7 +534,7 @@ $('file').onchange = async (e) => {
   const f = e.target.files[0]; if (!f) return;
   const txt = (await f.text()).slice(0, 2000000); $('paste').value = txt;
   if (/[\u3040-\u30FF]/.test(txt)) $('pasteLang').value = 'ja';
-  $('usePaste').click(); e.target.value = '';
+  status('File dibaca. Pilih bahasa subtitle, lalu klik "Pakai".'); e.target.value = ''; // tab tetap terbuka sampai "Pakai" diklik
 };
 $('usePaste').onclick = () => {
   const cues = parseSubs($('paste').value);
