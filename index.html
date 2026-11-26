@@ -181,6 +181,7 @@ details[open] summary::after{transform:rotate(45deg)}
 .mrow>button{flex:0 0 auto}
 .mctl{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:10px;margin-top:12px}
 .mctl button{min-height:48px;font-size:.88rem;padding:0 8px}
+label[for="mh"]{font-size:.546rem}
 .mnote{font-size:.78rem;color:var(--acc2);margin:10px 0 0}
 
 /* ---------- Tabel kana + ejaan ---------- */
@@ -488,7 +489,7 @@ function paintSbx() { $('sbxBtn').textContent = looseSbx ? 'Re-enable pop-up pro
 $('sbxBtn').onclick = () => {
   if (!lastWin) return;
   looseSbx = !looseSbx; P = mountWindow(lastWin, looseSbx); setCtl(false); paintSbx();
-  status(looseSbx ? 'Pop-up protection is OFF for this source: the site can open ad tabs again. Re-enable it once the video plays.' : 'Pop-up protection is active again.', looseSbx);
+  status(looseSbx ? 'Pop-up protection is OFF for this source so the site can open ad tabs again. Re-enable may pause the video.' : 'Pop-up protection is active again.', looseSbx);
 };
 
 /* ---------- Subtitle manual (.srt / .vtt) ---------- */
