@@ -128,11 +128,7 @@ details[open] summary::after{transform:rotate(45deg)}
   border:1px solid var(--line);box-shadow:0 22px 60px rgba(60,30,160,.45);
 }
 .player iframe,.player video{position:absolute;inset:0;width:100%;height:100%;border:0}
-/* Perbesar-ke-kontainer: hanya mengubah ukuran kotak pemutar di dalam halaman; Panel kata (.sheet, z-index 10) tetap di atasnya. */
-.player.big{--w:max(100%,min(calc(100vw - 20px),calc((100dvh - 210px)*16/9)));width:var(--w);margin-left:calc(50% - var(--w)/2)}
-.ctl{display:grid;grid-template-columns:1fr 1.3fr 1fr 62px;gap:10px;margin:14px 0 18px}
-#expand{padding:0;min-width:0}
-#expand svg{width:24px;height:24px;display:block;margin:0 auto}
+.ctl{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:10px;margin:14px 0 18px}
 .ctl button{min-height:62px;font-size:1rem}
 .ctl button:disabled{cursor:not-allowed;opacity:.45}
 #toggle{background:var(--grad-hot);box-shadow:0 12px 28px rgba(255,110,130,.45)}
@@ -227,24 +223,25 @@ details[open] summary::after{transform:rotate(45deg)}
   </section>
 
   <section class="card">
-    <label for="link">Link video (YouTube, .mp4, AnimeEmbed, VidRift, atau situs lain)</label>
+    <label for="link">Link video</label>
     <div class="row"><input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/..."><button id="load">Muat</button></div>
     <p id="status" class="status" role="status"></p>
     <details id="pasteBox"><summary>Subtitle tidak terbaca? Tempel manual</summary>
-      <p class="status" style="margin:6px 0 8px;font-size:.72rem">Buka situs unduh subtitle&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;unduh file .srt/.vtt&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;input file pada kotak di bawah.</p>
+      <p class="status" style="margin:6px 0 8px;font-size:.72rem">Buka situs unduh subtitle&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;unduh file .srt/.vtt&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;input file pada kotak di bawah&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;pilih jenis bahasa pada subtitle&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;klik pakai</p>
       <div class="row" style="margin-bottom:6px"><button id="openDown" type="button" class="alt" style="flex:1">Buka DownSub</button><button id="openSave" type="button" class="alt" style="flex:1">Buka SaveSubs</button></div>
       <p class="note" style="margin:0 0 10px">Link videomu otomatis disalin. Jika kolom di situs kosong, tempel saja (Ctrl+V). Hati-hati dengan iklan di situs itu: jangan pasang aplikasi atau ekstensi apa pun.</p>
       <label for="paste">Isi file subtitle (.srt atau .vtt)</label>
       <textarea id="paste" placeholder="Tempel isi subtitle di sini"></textarea>
       <label for="file" style="margin-top:12px">Atau pilih file subtitle (.srt / .vtt)</label><input id="file" type="file" accept=".srt,.vtt,.txt,text/*">
-      <div class="row" style="margin-top:12px"><select id="pasteLang" aria-label="Bahasa subtitle"><option value="ja">Jepang</option><option value="id">Indonesia</option><option value="en">Inggris</option></select><button id="usePaste" class="alt">Pakai</button></div>
+      <label for="pasteLang" style="margin-top:12px">Bahasa pada subtitle yang di input</label>
+      <div class="row"><select id="pasteLang" aria-label="Bahasa subtitle"><option value="ja">Jepang</option><option value="id">Indonesia</option><option value="en">Inggris</option></select><button id="usePaste" class="alt">Pakai</button></div>
     </details>
   </section>
 
   <section id="stage" hidden>
     <div id="player" class="player"></div>
     <div class="seek"><span id="tcur">0:00</span><input id="seekbar" type="range" min="0" max="1000" step="1" value="0" disabled aria-label="Posisi video"><span id="tdur">0:00</span></div>
-    <div class="ctl"><button id="back" class="alt" aria-label="Mundur 10 detik">&lt; 10 dtk</button><button id="toggle" aria-label="Putar atau jeda">▶ Putar</button><button id="fwd" class="alt" aria-label="Maju 10 detik">10 dtk &gt;</button><button id="expand" class="alt" type="button" aria-label="Perbesar video" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path id="expIco" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button></div>
+    <div class="ctl"><button id="back" class="alt" aria-label="Mundur 10 detik">&lt; 10 dtk</button><button id="toggle" aria-label="Putar atau jeda">▶ Putar</button><button id="fwd" class="alt" aria-label="Maju 10 detik">10 dtk &gt;</button></div>
     <div class="card">
       <div class="set">
         <div><label for="every">Jeda sorotan (menit)</label><div class="stepper"><button id="evDec" type="button" class="alt" aria-label="Kurangi jeda">−</button><input id="every" type="number" min="0.5" max="60" step="0.5" value="3" inputmode="decimal"><button id="evInc" type="button" class="alt" aria-label="Tambah jeda">+</button></div></div>
@@ -340,7 +337,7 @@ function mountVideo(src) {
 /* ---------- Sumber tambahan: pemutar iframe ber-API (AnimeEmbed, VidRift) + jendela situs lain ----------
    Semua sumber memakai antarmuka adapter yang SAMA dengan YouTube/MP4 (play, pause, seekBy, time, dur, seek, playing),
    jadi pop-up, jeda otomatis, PLAY AGAIN, NEXT, subtitle, dan bar durasi tidak tahu dan tidak perlu tahu sumbernya. */
-// Tanpa izin fullscreen: tombol fullscreen bawaan player (domain lain) tidak bisa mengambil alih layar perangkat. Perbesar memakai tombol aplikasi.
+// Mencabut izin Fullscreen API untuk iframe lintas-domain (berlaku di desktop, Android, iPad). TIDAK berpengaruh di iPhone Safari: di sana tidak ada Fullscreen API, dan fullscreen video memakai jalur native WebKit (video.webkitEnterFullscreen) yang tidak digerbang oleh izin ini.
 const IFRAME_ALLOW = "autoplay; picture-in-picture; encrypted-media; fullscreen 'none'";
 const WINDOW_MSG = 'Situs ini tampil sebagai jendela. Browser melarang aplikasi mengontrol player situs lain, jadi jeda otomatis TIDAK tersedia di sumber ini (untuk jeda otomatis pakai link embed AnimeEmbed atau VidRift). Tombol ✨ tetap bisa dipakai. Jika kotak pemutar kosong, situs itu melarang disematkan.';
 
@@ -435,14 +432,6 @@ function mountWindow(info) {
   const noop = () => {};
   return { viewOnly: true, play: noop, pause: noop, seekBy: noop, seek: noop, time: () => 0, dur: () => 0, playing: () => false, destroy: noop };
 }
-function setBig(on) {
-  const pl = $('player'), b = $('expand');
-  pl.classList.toggle('big', on); b.setAttribute('aria-pressed', String(on)); b.setAttribute('aria-label', on ? 'Kecilkan video' : 'Perbesar video');
-  $('expIco').setAttribute('d', on ? 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5' : 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5');
-  if (on) pl.scrollIntoView({ block: 'start', behavior: 'smooth' });
-}
-$('expand').onclick = () => setBig(!$('player').classList.contains('big'));
-addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('sheet').hidden && $('player').classList.contains('big')) setBig(false); });
 function setCtl(on) { ['toggle', 'back', 'fwd'].forEach((k) => { $(k).disabled = !on; }); }
 async function loadEmbed(emb) {
   status('Memuat pemutar…'); $('stage').hidden = false;
@@ -474,7 +463,7 @@ async function getSubs(raw) {
   try {
     const r = await (await fetch('/api/subtitles?url=' + encodeURIComponent(raw), { signal: timeoutSignal(25000) })).json();
     if (r.ok) { subs = { cues: r.cues, lang: r.language, auto: r.auto }; status(`✅ BERHASIL: ${r.cues.length} baris subtitle (bahasa: ${r.language}${r.auto ? ', otomatis' : ''}). Tekan Putar.`); }
-    else { status('❌ GAGAL: ' + (r.message || 'Subtitle gagal dimuat.'), true, true); $('pasteBox').open = true; }
+    else { status(r.code === 'NO_SUBTITLE' ? 'Video ini tidak punya subtitle.' : '❌ GAGAL: ' + (r.message || 'Subtitle gagal dimuat.'), true, true); $('pasteBox').open = true; }
   } catch (e) { status('❌ GAGAL: server tidak menjawab tepat waktu. Tekan Muat untuk mencoba lagi.', true, true); $('pasteBox').open = true; }
 }
 
@@ -544,7 +533,7 @@ let lastT = null;
 setInterval(() => {
   if (!P) return;
   let playing = false, t = 0; try { playing = P.playing(); t = P.time() || 0; } catch (e) {}
-  $('toggle').textContent = playing ? '⏸ Jeda' : '▶ Putar';
+  $('toggle').textContent = playing ? '⏸\uFE0E Jeda' : '▶ Putar';
   if (subs) { const c = subs.cues.filter((x) => x.start <= t && x.end >= t)[0]; $('sub').textContent = c ? c.text : ''; }
   const dt = lastT == null ? 0 : t - lastT; lastT = t;
   if (!$('sheet').hidden || !subs || busy) return;
@@ -616,8 +605,7 @@ function renderCard(j) {
   if (c.hiragana) body.append(kanaTable('Hiragana', ps.length ? ps.map((p) => moras(p.reading)) : [moras(c.hiragana)]));
   if (c.katakana) body.append(kanaTable('Katakana', ps.length ? ps.map((p) => moras(p.reading)) : [moras(c.katakana)]));
   if (c.kanji) body.append(kanaTable('Kanji', ps.length ? ps.map((p) => (p.kanji ? kanjiCells(p.kanji, p.reading, p.romaji) : moras(p.reading))) : [kanjiCells(c.kanji, c.hiragana || c.katakana || '', c.romaji)]));
-  if (c.type === 'phrase') body.append(kanaBox('Per kata', c.readingWithRomaji, c.kanjiWithRomaji));
-  if (j.viaTranslation) body.append(el('p', 'note', 'ℹ️ Subtitle video ini bukan bahasa Jepang, jadi kata dicari lewat terjemahan otomatis dan bisa kurang tepat.'));
+  if (j.viaTranslation) body.append(el('p', 'note', 'ⓘ Subtitle video ini bukan bahasa Jepang, jadi kata dicari lewat terjemahan otomatis dan bisa kurang tepat.'));
 }
 function renderMsg(text) { $('cardBody').replaceChildren(el('p', 'note', text)); }
 
