@@ -46,10 +46,11 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
     const c = parseJson3({ events: [{ tStartMs: 1500, dDurationMs: 500, segs: [{ utf8: '<script>x</script>halo\n dunia' }] }, { tStartMs: 9 }] });
     assert.strictEqual(c.length, 1); assert.strictEqual(c[0].text, 'xhalo dunia');
   });
-  await ok('Pilihan subtitle: Jepang > Indonesia > Inggris > bahasa lain; buatan manusia dulu', () => {
+  await ok('Pilihan subtitle asli: Jepang > Inggris > Indonesia; buatan manusia dulu; bahasa lain bukan subtitle asli yang dipakai', () => {
     assert.strictEqual(pickTrack([T('en'), T('ja', { kind: 'asr' }), T('ja'), T('id')]).kind, undefined);
-    assert.strictEqual(pickTrack([T('en'), T('id')]).languageCode, 'id');
-    assert.strictEqual(pickTrack([T('ko', { kind: 'asr' }), T('th')]).languageCode, 'th');
+    assert.strictEqual(pickTrack([T('en'), T('id')]).languageCode, 'en');
+    assert.strictEqual(pickTrack([T('id'), T('en', { kind: 'asr' })]).languageCode, 'en'); // Inggris otomatis-asli tetap bahasa asli & mendahului Indonesia
+    assert.strictEqual(pickTrack([T('ko', { kind: 'asr' }), T('th')]), null);
     assert.strictEqual(pickTrack([]), null);
   });
 
@@ -90,8 +91,8 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
   });
 
   // ---- endpoint ----
-  await ok('Subtitle Korea saja tetap diterima; tanpa subtitle muncul pemberitahuan', async () => {
-    await withServer({ fetchImpl: fake({ tracks: [T('ko')] }) }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.language, 'ko'); assert.strictEqual(r.body.title, 'Tes Video'); });
+  await ok('Subtitle Korea saja: diterjemahkan otomatis ke Jepang (bukan dipakai sebagai Korea); tanpa subtitle muncul pemberitahuan', async () => {
+    await withServer({ fetchImpl: fake({ tracks: [T('ko')] }) }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.language, 'ja'); assert.strictEqual(r.body.translated, true); assert.strictEqual(r.body.from, 'ko'); assert.strictEqual(r.body.title, 'Tes Video'); });
     await withServer({ fetchImpl: fake({ tracks: [] }) }, async (b) => { const r = await getJson(b, link); assert.strictEqual(r.body.code, 'NO_SUBTITLE'); assert.ok(r.body.message.includes('find another video')); });
   });
   await ok('Subtitle Jepang: tidak diterjemahkan ke Jepang, arti Indonesia & Inggris dari Google', () => {
@@ -510,6 +511,94 @@ const GOOD = (o = {}) => ({ lines: [{ text: 'kucing itu lucu' }], sourceLang: 'j
     els.mbar.value = '299'; els.mbar.oninput(); tick(4); assert.strictEqual(run('mn.clock.running'), false); assert.strictEqual(run('mNow()'), 300); assert.ok(els.mmsg.textContent.includes('duration was reached'));
     // Load video lain: panel & timer dibersihkan
     els.mreset.onclick(); assert.strictEqual(run('mn.started'), false); assert.strictEqual(els.mSetup.hidden, false); assert.strictEqual(intervals.length, nIntervals);
+  });
+
+  // =====================================================================
+  // AUTOMATIC SUBTITLE RETRIEVAL (YouTube): prioritas asli ja > en > id, lalu terjemahan otomatis ja > en > id.
+  // YouTube TIRUAN (tidak ada jaringan sungguhan): yang diuji adalah logika pemilihan & pembedaan jenis subtitle.
+  // =====================================================================
+  const TY = (lang, o = {}) => ({ baseUrl: 'https://www.youtube.com/api/timedtext?v=x&lang=' + lang + (o.kind === 'asr' ? '&kind=asr' : ''), languageCode: lang, ...o });
+  // yt({ tracks, tlangs, empty:[...] }): daftar permintaan timedtext dicatat di reqs; teks cue = "lang/jenis/tlang" agar terlihat track mana yang terpilih
+  function yt({ tracks = [], tlangs = ['ja', 'en', 'id', 'ko'], empty = [], broken = [] } = {}) {
+    const reqs = [];
+    const f = async (url) => {
+      const u = new URL(String(url));
+      if (u.pathname.includes('/youtubei/v1/player')) return resp(200, { videoDetails: { title: 'V' }, captions: { playerCaptionsTracklistRenderer: { captionTracks: tracks, ...(tlangs ? { translationLanguages: tlangs.map((l) => ({ languageCode: l })) } : {}) } } });
+      if (u.pathname.includes('/watch')) return txtResp(200, '');
+      if (u.pathname.includes('/api/timedtext')) {
+        const id = u.searchParams.get('lang') + '/' + (u.searchParams.get('kind') || 'manual') + '/' + (u.searchParams.get('tlang') || '-');
+        if (!reqs.includes(id)) reqs.push(id);
+        if (broken.some((b) => id.startsWith(b))) return txtResp(403, '');
+        if (empty.some((b) => id.startsWith(b))) return txtResp(200, '{"events":[]}');
+        return txtResp(200, JSON.stringify({ events: [{ tStartMs: 1000, dDurationMs: 2000, segs: [{ utf8: id }] }] }));
+      }
+      return txtResp(404, '');
+    };
+    return { f, reqs };
+  }
+  const run1 = async (opts) => { const m = yt(opts); let body; await withServer({ fetchImpl: m.f }, async (b) => { body = (await getJson(b, link)).body; }); return { body, reqs: m.reqs }; };
+
+  await ok('Prioritas ASLI: Jepang asli tersedia -> dipakai, walau urutan daftar acak dan Inggris/Indonesia ada', async () => {
+    const r = await run1({ tracks: [TY('id'), TY('en'), TY('ja')] });
+    assert.strictEqual(r.body.language, 'ja'); assert.strictEqual(r.body.translated, false); assert.strictEqual(r.body.auto, false); assert.strictEqual(r.body.cues[0].text, 'ja/manual/-');
+    assert.deepStrictEqual(r.reqs, ['ja/manual/-'], 'tidak ada permintaan lain (tidak ada terjemahan, tidak ada bahasa lain)');
+  });
+  await ok('Prioritas ASLI: hanya Inggris asli -> Inggris; hanya Indonesia asli -> Indonesia', async () => {
+    const a = await run1({ tracks: [TY('fr'), TY('en'), TY('id')] }); assert.strictEqual(a.body.language, 'en'); assert.strictEqual(a.body.translated, false); assert.deepStrictEqual(a.reqs, ['en/manual/-']);
+    const b = await run1({ tracks: [TY('fr'), TY('id')] }); assert.strictEqual(b.body.language, 'id'); assert.strictEqual(b.body.translated, false); assert.deepStrictEqual(b.reqs, ['id/manual/-']);
+  });
+  await ok('Subtitle otomatis-asli (ASR) bahasa asli diperlakukan sebagai ASLI, BUKAN terjemahan; bahasa prioritas menang atas jenis; manusia menang dalam satu bahasa', async () => {
+    const a = await run1({ tracks: [TY('en'), TY('ja', { kind: 'asr' })] });
+    assert.strictEqual(a.body.language, 'ja'); assert.strictEqual(a.body.auto, true); assert.strictEqual(a.body.translated, false); assert.ok(!('from' in a.body));
+    const b = await run1({ tracks: [TY('ja', { kind: 'asr' }), TY('ja')] }); assert.strictEqual(b.body.auto, false); assert.strictEqual(b.body.cues[0].text, 'ja/manual/-');
+  });
+  await ok('Jepang asli gagal diambil -> lanjut ke Inggris asli (bukan terjemahan otomatis)', async () => {
+    const r = await run1({ tracks: [TY('ja'), TY('en')], empty: ['ja/'] });
+    assert.strictEqual(r.body.language, 'en'); assert.strictEqual(r.body.translated, false); assert.deepStrictEqual(r.reqs, ['ja/manual/-', 'en/manual/-']);
+  });
+  await ok('Tidak ada ja/en/id asli -> terjemahan otomatis; urutan target Jepang dulu; jenis = terjemahan (bukan ASR)', async () => {
+    const r = await run1({ tracks: [TY('ko')] });
+    assert.strictEqual(r.body.language, 'ja'); assert.strictEqual(r.body.translated, true); assert.strictEqual(r.body.from, 'ko'); assert.strictEqual(r.body.auto, false); assert.strictEqual(r.body.cues[0].text, 'ko/manual/ja');
+    assert.deepStrictEqual(r.reqs, ['ko/manual/ja']);
+  });
+  await ok('Terjemahan otomatis: Jepang tidak ditawarkan YouTube -> Inggris; hanya Indonesia -> Indonesia; sumber manusia didahulukan dari ASR', async () => {
+    const a = await run1({ tracks: [TY('ko', { kind: 'asr' }), TY('ko')], tlangs: ['en', 'id'] }); assert.strictEqual(a.body.language, 'en'); assert.strictEqual(a.body.translated, true); assert.strictEqual(a.body.cues[0].text, 'ko/manual/en');
+    const b = await run1({ tracks: [TY('ko')], tlangs: ['id'] }); assert.strictEqual(b.body.language, 'id'); assert.strictEqual(b.body.translated, true);
+  });
+  await ok('Terjemahan otomatis ke Jepang gagal -> lanjut Inggris -> lanjut Indonesia (urutan terjaga)', async () => {
+    const a = await run1({ tracks: [TY('ko')], empty: ['ko/manual/ja'] }); assert.strictEqual(a.body.language, 'en'); assert.deepStrictEqual(a.reqs, ['ko/manual/ja', 'ko/manual/en']);
+    const b = await run1({ tracks: [TY('ko')], empty: ['ko/manual/ja', 'ko/manual/en'] }); assert.strictEqual(b.body.language, 'id'); assert.deepStrictEqual(b.reqs, ['ko/manual/ja', 'ko/manual/en', 'ko/manual/id']);
+  });
+  await ok('Tidak pernah memakai terjemahan otomatis bila subtitle asli ja/en/id berhasil; sumber terjemahan bukan bahasa target yang sama', async () => {
+    const a = await run1({ tracks: [TY('ko'), TY('id')] }); assert.strictEqual(a.body.language, 'id'); assert.strictEqual(a.body.translated, false); assert.ok(a.reqs.every((x) => x.endsWith('/-')));
+    const plan = S.translationPlan([TY('ja'), TY('ko')], null).map((p) => p.tlang + '<' + p.track.languageCode); // sumber ja tidak diterjemahkan ke ja
+    assert.deepStrictEqual(plan, ['ja<ko', 'en<ja', 'en<ko', 'id<ja', 'id<ko']);
+    assert.deepStrictEqual(S.translationPlan([TY('ko', { isTranslatable: false })], null), []);
+  });
+  await ok('Gagal: tanpa subtitle sama sekali / hanya bahasa yang tidak bisa diterjemahkan -> NO_SUBTITLE (tidak ada subtitle palsu); semua diblokir -> BOT_BLOCK', async () => {
+    const a = await run1({ tracks: [] }); assert.strictEqual(a.body.ok, false); assert.strictEqual(a.body.code, 'NO_SUBTITLE'); assert.ok(a.body.message.includes('Paste manually'));
+    const b = await run1({ tracks: [TY('ko', { isTranslatable: false })] }); assert.strictEqual(b.body.code, 'NO_SUBTITLE'); assert.strictEqual(b.reqs.length, 0);
+    const c = await run1({ tracks: [TY('ja'), TY('ko')], broken: ['ja/', 'ko/'] }); assert.strictEqual(c.body.ok, false); assert.strictEqual(c.body.code, 'BOT_BLOCK'); assert.ok(!c.body.cues);
+  });
+  await ok('Supadata: urutan ja > en > id; bahasa lain (Korea) -> diserahkan ke jalur YouTube untuk terjemahan otomatis', async () => {
+    const calls = [];
+    const sup = (avail, def) => async (url, o) => {
+      const u = new URL(String(url));
+      if (u.hostname === 'api.supadata.ai') { const l = u.searchParams.get('lang'); calls.push('S:' + l); const lang = l || def; return resp(200, { lang, availableLangs: avail, content: [{ text: 'sup-' + lang, offset: 0, duration: 1000 }] }); }
+      return yt({ tracks: [TY('ko')] }).f(url);
+    };
+    await withServer({ fetchImpl: sup(['id', 'en'], 'id'), supadataKey: 'K' }, async (b) => { const r = (await getJson(b, link)).body; assert.strictEqual(r.language, 'en'); assert.deepStrictEqual(calls, ['S:null', 'S:en']); });
+    calls.length = 0;
+    await withServer({ fetchImpl: sup(['ko'], 'ko'), supadataKey: 'K2' }, async (b) => { const r = (await getJson(b, link)).body; assert.strictEqual(r.ok, true); assert.strictEqual(r.translated, true); assert.strictEqual(r.language, 'ja'); assert.strictEqual(r.from, 'ko'); });
+  });
+  await ok('Halaman: status subtitle otomatis YouTube membedakan asli / auto-generated / auto-translated dan gagal -> panel manual tetap tersedia', async () => {
+    const mk = (r) => { const els = {}; const mkEl = (id) => ({ id, style: { setProperty() {} }, classList: { add() {}, remove() {}, toggle() {} }, children: [], textContent: '', className: '', value: '', hidden: false, open: false, disabled: false, append() {}, replaceChildren() {}, setAttribute() {}, addEventListener() {}, focus() {}, appendChild() {}, set innerHTML(v) {}, get innerHTML() { return ''; } });
+      const ctx = vm.createContext({ document: { getElementById: (id) => (els[id] ||= mkEl(id)), createElement: (t) => mkEl(t), documentElement: { style: { setProperty() {} } }, head: { appendChild() {} } }, window: {}, localStorage: { getItem: () => null, setItem() {} }, performance: { now: () => 0 }, setInterval: () => 0, setTimeout: () => 0, clearTimeout() {}, addEventListener() {}, removeEventListener() {}, innerWidth: 1000, innerHeight: 800, location: { origin: 'http://x' }, navigator: {}, URL, AbortController, console, fetch: async () => ({ json: async () => r }) });
+      vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], ctx); return { els, ctx }; };
+    const cases = [[{ ok: true, language: 'ja', auto: false, cues: [{ start: 0, end: 1, text: 'a' }] }, 'original'], [{ ok: true, language: 'ja', auto: true, cues: [{ start: 0, end: 1, text: 'a' }] }, 'auto-generated'], [{ ok: true, language: 'en', auto: false, translated: true, from: 'ko', cues: [{ start: 0, end: 1, text: 'a' }] }, 'auto-translated from ko']];
+    for (const [r, label] of cases) { const { els, ctx } = mk(r); await vm.runInContext("getSubs('https://youtu.be/dQw4w9WgXcQ')", ctx); assert.ok(els.status.textContent.includes('(language: ' + r.language + ', ' + label + ')'), els.status.textContent); assert.ok(vm.runInContext('subs', ctx).cues.length === 1); }
+    const { els, ctx } = mk({ ok: false, code: 'NO_SUBTITLE', message: 'No subtitles could be retrieved for this video.' }); await vm.runInContext("getSubs('https://youtu.be/dQw4w9WgXcQ')", ctx);
+    assert.ok(els.status.textContent.startsWith('❌ FAILED: No subtitles could be retrieved')); assert.strictEqual(els.pasteBox.open, true); assert.strictEqual(vm.runInContext('subs', ctx), null, 'tidak ada subtitle palsu');
   });
 
 

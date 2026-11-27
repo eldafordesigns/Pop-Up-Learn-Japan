@@ -23,7 +23,7 @@ const YT_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com', 'yo
 const MSG = {
   BAD_LINK: 'Invalid link. Paste the full video link.',
   UNSUPPORTED_SITE: 'This site is not supported yet. Only YouTube is supported at the moment.',
-  NO_SUBTITLE: 'This video has no subtitles. Please find another video.',
+  NO_SUBTITLE: 'No subtitles could be retrieved for this video: there are no Japanese, English or Indonesian subtitles, and none that YouTube can auto-translate. Use "Paste manually" below, or find another video.',
   RATE_LIMIT: 'Too many requests. Wait one minute and try again.',
   UPSTREAM: 'Failed to retrieve subtitles from YouTube. Try again later, choose another video, or paste the subtitles manually.',
   BAD_INPUT: 'The data sent is incomplete or invalid.',
@@ -72,14 +72,28 @@ function parseJson3(data) {
 }
 
 const matchLang = (t, l) => t.languageCode === l || (t.languageCode || '').startsWith(l + '-');
-function orderTracks(tracks) { // Jepang > Indonesia > Inggris > lain; buatan manusia dulu, lalu otomatis
-  const out = [], seen = new Set();
-  const add = (list) => { for (const t of [...list.filter((x) => x.kind !== 'asr'), ...list.filter((x) => x.kind === 'asr')]) if (!seen.has(t)) { seen.add(t); out.push(t); } };
-  for (const l of ['ja', 'id', 'en']) add(tracks.filter((t) => matchLang(t, l)));
-  add(tracks);
+const PRIORITY = ['ja', 'en', 'id']; // urutan prioritas bahasa, berlaku untuk subtitle asli MAUPUN terjemahan otomatis
+// PRIORITAS PERTAMA: subtitle ASLI (daftar captionTracks). Urutan: Jepang > Inggris > Indonesia; dalam satu bahasa, buatan manusia dulu,
+// lalu subtitle otomatis-asli (kind 'asr', suara dikenali YouTube dalam bahasa aslinya) yang tetap dihitung sebagai subtitle bahasa asli.
+// Bahasa di luar ja/en/id TIDAK dipakai sebagai subtitle asli (hanya bisa menjadi sumber terjemahan otomatis).
+function orderTracks(tracks) {
+  const out = [];
+  for (const l of PRIORITY) { const m = tracks.filter((t) => matchLang(t, l)); out.push(...m.filter((x) => x.kind !== 'asr'), ...m.filter((x) => x.kind === 'asr')); }
   return out;
 }
 const pickTrack = (tracks) => orderTracks(tracks)[0] || null;
+// PRIORITAS KEDUA: TERJEMAHAN OTOMATIS YouTube (parameter tlang pada track yang ada). Urutan target: Jepang > Inggris > Indonesia.
+// Sumber terjemahan: track yang dapat diterjemahkan, bahasanya bukan target itu sendiri, buatan manusia dulu lalu otomatis-asli (maks. 2 sumber per target).
+// tlangs = himpunan bahasa terjemahan yang diumumkan YouTube (null = tidak diumumkan, tetap dicoba).
+function translationPlan(tracks, tlangs) {
+  const src = [...tracks.filter((t) => t.kind !== 'asr'), ...tracks.filter((t) => t.kind === 'asr')].filter((t) => t.baseUrl && t.isTranslatable !== false);
+  const out = [];
+  for (const l of PRIORITY) {
+    if (tlangs && !tlangs.has(l)) continue;
+    for (const t of src.filter((x) => !matchLang(x, l)).slice(0, 2)) out.push({ track: t, tlang: l });
+  }
+  return out;
+}
 
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
 
@@ -91,10 +105,11 @@ async function getText(fetchImpl, url, opts = {}, lim = {}) {
   return t;
 }
 
-function captionUrl(baseUrl, fmt = 'json3') {
+function captionUrl(baseUrl, fmt = 'json3', tlang = null) {
   const u = new URL(baseUrl);
   if (u.protocol !== 'https:' || !(u.hostname === 'youtube.com' || u.hostname.endsWith('.youtube.com'))) throw new Error('alamat subtitle mencurigakan');
   if (fmt) u.searchParams.set('fmt', fmt); else u.searchParams.delete('fmt');
+  if (tlang) u.searchParams.set('tlang', tlang); // terjemahan otomatis YouTube
   return u.toString();
 }
 
@@ -191,7 +206,7 @@ async function fetchSubtitles(fetchImpl, videoId, budget = 8000) {
   if (!got.length) return { error: 'UPSTREAM', trace };
 
   const title = cleanText(got.map((r) => r.info.videoDetails && r.info.videoDetails.title).find(Boolean));
-  const sources = got.map((r) => ({ label: r.label, tracks: r.info?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [] })).filter((s) => s.tracks.length);
+  const sources = got.map((r) => { const rend = r.info?.captions?.playerCaptionsTracklistRenderer; const tl = Array.isArray(rend?.translationLanguages) ? rend.translationLanguages.map((x) => String(x && x.languageCode || '').split('-')[0]).filter(Boolean) : []; return { label: r.label, tracks: rend?.captionTracks || [], tlangs: tl.length ? new Set(tl) : null }; }).filter((s) => s.tracks.length);
   if (!sources.length) {
     const okPlay = got.some((r) => r.info.playabilityStatus && r.info.playabilityStatus.status === 'OK');
     const bot = got.some((r) => r.info.playabilityStatus && r.info.playabilityStatus.status === 'LOGIN_REQUIRED' && /bot|sign in/i.test(String(r.info.playabilityStatus.reason || '')));
@@ -199,15 +214,23 @@ async function fetchSubtitles(fetchImpl, videoId, budget = 8000) {
   }
 
   const key = (t) => (t.languageCode || '') + '|' + (t.kind || '');
-  outer: for (const t of orderTracks(sources[0].tracks).slice(0, 3)) {
+  // Daftar percobaan BERURUTAN sesuai prioritas: subtitle asli dulu (ja, en, id), baru terjemahan otomatis (ja, en, id).
+  // Satu tingkat baru dilewati bila memang tidak ada atau gagal diambil; tingkat yang lebih rendah tidak pernah mendahului yang lebih tinggi.
+  const plan = [...orderTracks(sources[0].tracks).map((t) => ({ track: t, tlang: null })), ...translationPlan(sources[0].tracks, sources[0].tlangs)];
+  if (!plan.length) return { error: 'NO_SUBTITLE', trace }; // tidak ada ja/en/id asli dan tidak ada yang bisa diterjemahkan
+  outer: for (const { track: t, tlang } of plan) {
     for (const s of sources) {
       const tt = s.tracks.find((x) => key(x) === key(t)); if (!tt || !tt.baseUrl) continue;
       for (const fmt of ['json3', null, 'vtt']) {
         if (Date.now() > deadline) break outer;
-        const lbl = `${s.label}/${t.languageCode}/${fmt || 'xml'}`;
+        const lbl = `${s.label}/${t.languageCode}${tlang ? '>' + tlang : ''}/${fmt || 'xml'}`;
         try {
-          const cues = parseCaption(await getText(fetchImpl, captionUrl(tt.baseUrl, fmt), { headers: { 'User-Agent': CHROME_UA, 'Accept-Language': 'en-US,en;q=0.9' } }, { timeout: left() }));
-          if (cues.length) return { ok: true, videoId, title, language: t.languageCode, auto: t.kind === 'asr', cues };
+          const cues = parseCaption(await getText(fetchImpl, captionUrl(tt.baseUrl, fmt, tlang), { headers: { 'User-Agent': CHROME_UA, 'Accept-Language': 'en-US,en;q=0.9' } }, { timeout: left() }));
+          if (cues.length) {
+            return tlang
+              ? { ok: true, videoId, title, language: tlang, auto: false, translated: true, from: t.languageCode, cues }
+              : { ok: true, videoId, title, language: t.languageCode, auto: t.kind === 'asr', translated: false, cues };
+          }
           trace.push(lbl + ':kosong');
         } catch (e) { trace.push(lbl + ':' + tag(e)); }
       }
@@ -240,7 +263,7 @@ async function fetchViaSupadata(fetchImpl, key, videoId) { // hasil: {ok,...} | 
     if (a.status !== 200 || !a.j) return { error: 'SOFT', trace };
     let { lang, content } = a.j; const avail = Array.isArray(a.j.availableLangs) ? a.j.availableLangs : [];
     let cues = supCues(content);
-    const want = ['ja', 'id', 'en'].find((l) => avail.some((x) => String(x).split('-')[0] === l));
+    const want = PRIORITY.find((l) => avail.some((x) => String(x).split('-')[0] === l));
     if (want && String(lang || '').split('-')[0] !== want) { // ada bahasa yang lebih cocok: minta sekali lagi
       try {
         const b = await supadataCall(fetchImpl, key, videoId, want); trace.push('SUPADATA/' + want + ':' + b.status);
@@ -249,7 +272,8 @@ async function fetchViaSupadata(fetchImpl, key, videoId) { // hasil: {ok,...} | 
       } catch { trace.push('SUPADATA/' + want + ':gagal'); }
     }
     if (!cues.length) return { error: 'NO_SUBTITLE', trace };
-    return { ok: true, videoId, title: '', language: String(lang || 'und'), auto: false, cues, trace };
+    if (!PRIORITY.includes(String(lang || '').split('-')[0])) { trace.push('SUPADATA:bahasa-lain'); return { error: 'OTHER_LANG', trace }; } // bukan ja/en/id: biarkan jalur YouTube mencoba terjemahan otomatis
+    return { ok: true, videoId, title: '', language: String(lang || 'und'), auto: false, translated: false, cues, trace };
   } catch (e) { trace.push('SUPADATA:' + tag(e)); return { error: 'SOFT', trace }; }
 }
 
@@ -775,7 +799,7 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
       quota = s.error === 'QUOTA';
     }
     if (!out) { // cadangan: langsung ke YouTube
-      out = await fetchSubtitles(fetchImpl, id, supadataKey ? 3000 : 8000);
+      out = await fetchSubtitles(fetchImpl, id, supadataKey && !pre.includes('SUPADATA:bahasa-lain') ? 3000 : 8000);
       out.trace = [...pre, ...(out.trace || [])];
       if (quota && out.error) out = { error: 'QUOTA', trace: out.trace };
     }
@@ -885,7 +909,7 @@ function createServer({ fetchImpl = fetch, getTokenizer = defaultTokenizer, inde
   });
 }
 
-module.exports = { fetchPageSubtitles, scanTracks, scanFrames, rankCandidates, langOf, isPrivateIp, assertPublicUrl, createServer, fetchViaSupadata, parseXml, parseVtt, parseCaption, extractPlayerResponse, orderTracks, fetchSubtitles, extractVideoId, parseJson3, pickTrack, captionUrl, cleanText, buildCard, cleanInput, toRomaji, toHiragana, candidates, partsOf, splitSegments, segmentPools, pickFromPools, translationChunks, sampleEvenly, foldKey, sourcePools, drawSourceBatch, japaneseParts };
+module.exports = { translationPlan, fetchPageSubtitles, scanTracks, scanFrames, rankCandidates, langOf, isPrivateIp, assertPublicUrl, createServer, fetchViaSupadata, parseXml, parseVtt, parseCaption, extractPlayerResponse, orderTracks, fetchSubtitles, extractVideoId, parseJson3, pickTrack, captionUrl, cleanText, buildCard, cleanInput, toRomaji, toHiragana, candidates, partsOf, splitSegments, segmentPools, pickFromPools, translationChunks, sampleEvenly, foldKey, sourcePools, drawSourceBatch, japaneseParts };
 
 if (require.main === module) {
   createServer().listen(PORT, () => {

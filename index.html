@@ -242,7 +242,7 @@ label[for="mh"]{font-size:.546rem}
     <p id="status" class="status" role="status"></p>
     <details id="pasteBox"><summary>Subtitle not detected? Paste manually</summary>
       <p class="status" style="margin:6px 0 8px;font-size:.72rem">Open the subtitle downloader site&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;download the .srt/.vtt file&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;choose file in the box below&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;select the subtitle language&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;click APPLY</p>
-      <div class="row" style="margin-bottom:6px"><button id="openDown" type="button" class="alt" style="flex:1">Subtitle Downloader 1</button><button id="openSave" type="button" class="alt" style="flex:1">Subtitle Downloader 2</button></div>
+      <div class="row" style="margin-bottom:6px"><button id="openDown" type="button" class="alt" style="flex:1;font-size:.9em">Subtitle Downloader 1</button><button id="openSave" type="button" class="alt" style="flex:1;font-size:.9em">Subtitle Downloader 2</button></div>
       <p class="note" style="margin:0 0 10px">Your video link is copied automatically. If the field on the site is empty, just paste it (Ctrl+V).</p>
       <label for="file">Select a subtitle file (.srt / .vtt)</label><input id="file" type="file" accept=".srt,.vtt,.txt,text/*">
       <label for="paste" style="margin-top:12px">Or paste subtitle content (.srt or .vtt)</label>
@@ -510,8 +510,12 @@ async function getSubs(raw) {
   status('Retrieving subtitles from the video… (may take up to 20 seconds)'); subs = null; resetTimer();
   try {
     const r = await (await fetch('/api/subtitles?url=' + encodeURIComponent(raw), { signal: timeoutSignal(25000) })).json();
-    if (r.ok) { subs = { cues: r.cues, lang: r.language, auto: r.auto }; status(`✅ SUCCESS: ${r.cues.length} subtitle lines (language: ${r.language}${r.auto ? ', automatic' : ''}). Press Play.`); }
-    else { status(r.code === 'NO_SUBTITLE' ? 'This video has no subtitles.' : '❌ FAILED: ' + (r.message || 'Subtitles failed to load.'), true, true); $('pasteBox').open = true; }
+    if (r.ok) {
+      subs = { cues: r.cues, lang: r.language, auto: r.auto, translated: !!r.translated };
+      const kind = r.translated ? `auto-translated from ${r.from || 'another language'}` : r.auto ? 'auto-generated' : 'original';
+      status(`✅ SUCCESS: ${r.cues.length} subtitle lines (language: ${r.language}, ${kind}). Press Play.`);
+    }
+    else { status('❌ FAILED: ' + (r.message || 'Subtitles failed to load.'), true, true); $('pasteBox').open = true; }
   } catch (e) { status('❌ FAILED: the server did not respond in time. Press Load to try again.', true, true); $('pasteBox').open = true; }
 }
 
