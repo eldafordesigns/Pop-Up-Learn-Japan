@@ -234,17 +234,17 @@ label[for="mh"]{font-size:.546rem}
 
   <section class="hero">
     <h1><b>Learn</b><span class="jp">Japanese</span> from Videos</h1>
-    <p>Paste a video link, an .mp4 file, or a player link from another site, then discover new words while you watch your favorite videos.</p>
+    <p>Paste a video link or a player link from another site, then discover new words while you watch your favorite videos.</p>
   </section>
 
   <section class="card">
-    <label for="link">Video URL (YouTube or .mp4 file)</label>
+    <label for="link">Video URL (YouTube or other sites)</label>
     <div class="row"><input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/..."><button id="load">Load</button></div>
     <p id="status" class="status" role="status"></p>
     <details id="pasteBox"><summary>Subtitle not detected? Input manually</summary>
       <p class="status" style="margin:6px 0 8px;font-size:.72rem">Open the subtitle downloader site&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;download the .srt/.vtt file&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;choose file in the box below&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;select the subtitle language&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;click APPLY</p>
       <div class="row" style="margin-bottom:6px"><button id="openDown" type="button" class="alt" style="flex:1">Subtitle Downloader 1</button><button id="openSave" type="button" class="alt" style="flex:1">Subtitle Downloader 2</button></div>
-      <p class="note" style="margin:0 0 10px">Your video link is copied automatically. If the field on the site is empty, just paste it (Ctrl+V).</p>
+      <p class="note" style="margin:0 0 10px;font-size:.72rem;font-weight:700">Your video link is copied automatically. If the field on the site is empty, just paste it (Ctrl+V).</p>
       <label for="file">Select a subtitle file (.srt / .vtt)</label><input id="file" type="file" accept=".srt,.vtt,.txt,text/*">
       <label for="paste" style="margin-top:12px">Or paste subtitle content (.srt or .vtt)</label>
       <textarea id="paste" placeholder="Paste the subtitle content here"></textarea>
@@ -512,7 +512,7 @@ async function getSubs(raw) {
   try {
     const r = await (await fetch('/api/subtitles?url=' + encodeURIComponent(raw), { signal: timeoutSignal(25000) })).json();
     if (r.ok) { subs = { cues: r.cues, lang: r.language, auto: r.auto }; status(`✅ SUCCESS: ${r.cues.length} subtitle lines (language: ${r.language}${r.auto ? ', automatic' : ''}). Press Play.`); }
-    else { status(r.code === 'NO_SUBTITLE' ? 'This video has no subtitles.' : '❌ FAILED: ' + (r.message || 'Subtitles failed to load.'), true, true); $('pasteBox').open = true; }
+    else { status(r.code === 'NO_SUBTITLE' ? 'Subtitles are not detected' : '❌ FAILED: ' + (r.message || 'Subtitles failed to load.'), true, true); $('pasteBox').open = true; }
   } catch (e) { status('❌ FAILED: the server did not respond in time. Press Load to try again.', true, true); $('pasteBox').open = true; }
 }
 
@@ -549,7 +549,7 @@ $('load').onclick = async () => {
     } else {
       const emb = classifyEmbed(raw);
       if (emb) { await loadEmbed(emb); if (P && seq === loadSeq) await getPageSubs(raw, seq); }
-      else status('This link is not supported yet. Use an https:// link (YouTube, an .mp4 file, or a video player page).', true);
+      else status('This link is not supported yet. Use an https:// link (YouTube or a video player page).', true);
     }
   } catch (e) { status(e && e.message === 'timeout' ? 'The YouTube player is not responding. Try another video, turn off your ad blocker for this site, or reload with Ctrl+F5.' : 'Failed to load. Check your internet and try again.', true); }
 };

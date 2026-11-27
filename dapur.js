@@ -23,7 +23,7 @@ const YT_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com', 'yo
 const MSG = {
   BAD_LINK: 'Invalid link. Paste the full video link.',
   UNSUPPORTED_SITE: 'This site is not supported yet. Only YouTube is supported at the moment.',
-  NO_SUBTITLE: 'This video has no subtitles. Please find another video.',
+  NO_SUBTITLE: 'Subtitles are not detected',
   RATE_LIMIT: 'Too many requests. Wait one minute and try again.',
   UPSTREAM: 'Failed to retrieve subtitles from YouTube. Try again later, choose another video, or paste the subtitles manually.',
   BAD_INPUT: 'The data sent is incomplete or invalid.',
