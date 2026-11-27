@@ -121,8 +121,9 @@ details{margin-top:12px}
 summary{cursor:pointer;color:#fff;font-weight:600;font-size:.9rem;min-height:44px;display:flex;align-items:center;gap:6px;list-style:none;-webkit-tap-highlight-color:transparent}
 summary::-webkit-details-marker{display:none}
 /* simbol (+) membuka panel, (×) menutup. Ukuran lama = .9rem; +30% = 1.17rem; bold */
-summary::after{content:"＋";margin-left:auto;transition:transform .25s;font-size:1.17rem;font-weight:700;line-height:1;padding:0 6px}
+summary::after{content:"＋";margin-left:auto;transition:transform .25s;font-size:1.404rem;font-weight:700;line-height:1;padding:0 6px}
 details[open] summary::after{transform:rotate(45deg)}
+#openDown,#openSave{font-size:.9em}
 
 /* ---------- Pemutar ---------- */
 .player{
@@ -240,7 +241,7 @@ label[for="mh"]{font-size:.546rem}
     <label for="link">Video URL (YouTube or .mp4 file)</label>
     <div class="row"><input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/..."><button id="load">Load</button></div>
     <p id="status" class="status" role="status"></p>
-    <details id="pasteBox"><summary>Subtitle not detected? Paste manually</summary>
+    <details id="pasteBox"><summary>Subtitle not detected? Input manually</summary>
       <p class="status" style="margin:6px 0 8px;font-size:.72rem">Open the subtitle downloader site&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;download the .srt/.vtt file&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;choose file in the box below&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;select the subtitle language&nbsp;&nbsp;&nbsp;→&nbsp;&nbsp;&nbsp;click APPLY</p>
       <div class="row" style="margin-bottom:6px"><button id="openDown" type="button" class="alt" style="flex:1">Subtitle Downloader 1</button><button id="openSave" type="button" class="alt" style="flex:1">Subtitle Downloader 2</button></div>
       <p class="note" style="margin:0 0 10px">Your video link is copied automatically. If the field on the site is empty, just paste it (Ctrl+V).</p>
@@ -530,7 +531,7 @@ async function getPageSubs(raw, seq) {
       status(`✅ ${r.cues.length} subtitle lines retrieved automatically from the video source (language: ${r.label || r.language}).` + (P && P.viewOnly ? note : ' Press Play.'));
       offerManual();
     } else { status(P && P.viewOnly ? WIN_SUB_MSG : '❌ ' + (r.message || 'Subtitles could not be retrieved automatically.'), true, true); $('pasteBox').open = true; }
-  } catch (e) { if (seq !== loadSeq) return; status('❌ FAILED: the server did not respond in time. Press Load to try again, or use "Paste manually".' + note, true, true); $('pasteBox').open = true; }
+  } catch (e) { if (seq !== loadSeq) return; status('❌ FAILED: the server did not respond in time. Press Load to try again, or use "Input manually".' + note, true, true); $('pasteBox').open = true; }
 }
 
 /* ---------- Memuat video ---------- */
